@@ -1,0 +1,1727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Flow Dashboard</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Claude Flow Dashboard — Clean light theme with strong hierarchy
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg:         #f8fafc;
+  --bg-white:   #ffffff;
+  --bg-hover:   #f1f5f9;
+  --bg-active:  #eff6ff;
+  --bg-sidebar: #ffffff;
+  --bg-card:    #ffffff;
+
+  --agent:      #2563eb;
+  --agent-bg:   #eff6ff;
+  --agent-bdr:  #bfdbfe;
+  --skill:      #7c3aed;
+  --skill-bg:   #f5f3ff;
+  --bash:       #1e293b;
+  --bash-bg:    #f8fafc;
+  --read:       #64748b;
+  --read-bg:    #f8fafc;
+  --edit:       #ca8a04;
+  --edit-bg:    #fefce8;
+  --send:       #d97706;
+  --send-bg:    #fffbeb;
+  --task:       #059669;
+  --task-bg:    #ecfdf5;
+  --cmd:        #4f46e5;
+  --cmd-bg:     #eef2ff;
+  --mcp:        #0891b2;
+  --mcp-bg:     #ecfeff;
+
+  --text:       #1e293b;
+  --text-2:     #475569;
+  --text-3:     #94a3b8;
+  --border:     #e2e8f0;
+  --border-2:   #cbd5e1;
+  --green:      #16a34a;
+  --red:        #dc2626;
+
+  --font-ui:    'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono:  'JetBrains Mono', 'Fira Code', monospace;
+  --radius:     8px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text);
+             font-family: var(--font-ui); font-size: 13px; overflow: hidden; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-2); }
+button { font-family: inherit; cursor: pointer; }
+input, select { font-family: inherit; }
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+#app { height: 100vh; display: flex; flex-direction: column; }
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+  background: var(--bg-white); flex-shrink: 0; z-index: 20;
+}
+.topbar__logo {
+  font-size: 13px; font-weight: 700; color: var(--text);
+  letter-spacing: -.02em;
+}
+.topbar__logo span { color: var(--agent); }
+.topbar__session {
+  font-size: 11px; color: var(--text-3); font-family: var(--font-mono);
+}
+.topbar__live {
+  display: flex; align-items: center; gap: 5px; font-size: 10px;
+  font-weight: 600; margin-left: auto;
+}
+.topbar__live--on { color: var(--green); }
+.topbar__live--off { color: var(--text-3); }
+.topbar__dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.topbar__dot--on { background: var(--green); animation: pulse 1.6s ease-in-out infinite; }
+.topbar__dot--off { background: var(--text-3); opacity: .4; }
+
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.sidebar {
+  width: 252px; flex-shrink: 0; border-right: 1px solid var(--border);
+  background: var(--bg-sidebar); display: flex; flex-direction: column;
+}
+.sidebar__hdr {
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.sidebar__title {
+  font-size: 11px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0;
+}
+.sidebar__search {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; color: var(--text); font-size: 11px;
+  padding: 4px 8px; outline: none; min-width: 0;
+  transition: border-color .15s;
+}
+.sidebar__search:focus { border-color: var(--agent); box-shadow: 0 0 0 2px rgba(37,99,235,.1); }
+.sidebar__search::placeholder { color: var(--text-3); }
+.sidebar__list { flex: 1; overflow-y: auto; }
+
+.proj-hdr {
+  padding: 6px 12px; font-size: 10px; font-weight: 700;
+  color: var(--text-2); background: var(--bg);
+  border-bottom: 1px solid var(--border); cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+  text-transform: uppercase; letter-spacing: .04em;
+  position: sticky; top: 0; z-index: 2; user-select: none;
+}
+.proj-hdr__chev { font-size: 8px; color: var(--text-3); }
+.proj-hdr__count { color: var(--text-3); font-weight: 500; margin-left: auto; font-size: 10px; }
+
+.date-hdr {
+  padding: 4px 12px; font-size: 9px; font-weight: 600; letter-spacing: .04em;
+  color: var(--text-3); background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.sess {
+  padding: 7px 12px; cursor: pointer; border-left: 3px solid transparent;
+  display: flex; align-items: center; gap: 6px;
+  transition: background .1s; font-size: 11px; color: var(--text-2);
+  border-bottom: 1px solid #f1f5f9;
+}
+.sess:hover { background: var(--bg-hover); }
+.sess--active { border-left-color: var(--agent); background: var(--bg-active); color: var(--text); }
+.sess__time { font-family: var(--font-mono); font-weight: 500; color: var(--text); font-size: 11px; }
+.sess__arrow { color: var(--text-3); font-size: 9px; }
+.sess__end { font-family: var(--font-mono); font-size: 11px; }
+.sess__count { color: var(--text-3); margin-left: auto; font-size: 10px; font-family: var(--font-mono); }
+.sess__live {
+  font-size: 9px; font-weight: 700; color: var(--green);
+  background: #dcfce7; border-radius: 3px; padding: 1px 5px;
+}
+
+/* ── Right panel ─────────────────────────────────────────────────────────── */
+.right { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Stats HUD */
+.hud {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 16px; border-bottom: 1px solid var(--border);
+  background: var(--bg-white); flex-shrink: 0;
+}
+.hud__label {
+  font-size: 10px; color: var(--text-3); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.hud__pill {
+  font-size: 11px; border-radius: 4px; padding: 2px 8px; font-weight: 600;
+  font-family: var(--font-mono); white-space: nowrap;
+}
+.hud__pill--in  { color: #1d4ed8; background: #dbeafe; }
+.hud__pill--out { color: #166534; background: #dcfce7; }
+.hud__pill--cr  { color: #92400e; background: #fef3c7; }
+.hud__pill--cc  { color: #6b21a8; background: #f3e8ff; }
+.hud__pill--cost { color: #166534; background: #dcfce7; }
+.hud__sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; }
+.hud__tool {
+  font-size: 10px; color: var(--text-2); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
+  font-family: var(--font-mono); white-space: nowrap;
+}
+.hud__duration { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); margin-left: auto; }
+.hud__children { font-size: 11px; color: var(--skill); }
+
+/* Tab bar */
+.tabs {
+  display: flex; align-items: center; border-bottom: 1px solid var(--border);
+  background: var(--bg-white); flex-shrink: 0; padding: 0 12px;
+}
+.tab {
+  padding: 8px 16px; font-size: 12px; font-weight: 600;
+  color: var(--text-3); border: none; background: none;
+  border-bottom: 2px solid transparent;
+  transition: color .12s, border-color .12s;
+}
+.tab:hover { color: var(--text-2); }
+.tab--active { color: var(--agent); border-bottom-color: var(--agent); }
+.tab__count { font-weight: 400; opacity: .5; margin-left: 3px; }
+
+.tab-tools { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.tab-btn {
+  font-size: 10px; color: var(--text-3); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 10px; transition: all .12s;
+}
+.tab-btn:hover { color: var(--text); border-color: var(--border-2); }
+.tab-btn--active { color: var(--agent); border-color: var(--agent); background: #eff6ff; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TREE VIEW — Strong visual hierarchy
+   ══════════════════════════════════════════════════════════════════════════ */
+.tree-wrap { flex: 1; overflow: auto; padding: 16px 20px; background: var(--bg); }
+
+/* ── Agent node (container — visually prominent) ─────────────────────────── */
+.n-agent {
+  margin-bottom: 6px; border-radius: var(--radius);
+  border: 1px solid var(--agent-bdr); background: var(--bg-white);
+  overflow: hidden;
+}
+.n-agent__hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; cursor: pointer; user-select: none;
+  background: var(--agent-bg); border-bottom: 1px solid var(--agent-bdr);
+}
+.n-agent__icon {
+  width: 22px; height: 22px; border-radius: 5px;
+  background: var(--agent); color: #fff; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.n-agent__title { font-weight: 600; font-size: 12px; color: var(--agent); }
+.n-agent__desc { font-size: 11px; color: var(--text-2); flex: 1; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
+.n-agent__meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.n-agent__tokens {
+  font-size: 10px; font-family: var(--font-mono); color: var(--text-3);
+  display: flex; gap: 4px;
+}
+.n-agent__tokens .t-in  { color: #2563eb; }
+.n-agent__tokens .t-out { color: #16a34a; }
+.n-agent__status {
+  font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px;
+}
+.n-agent__status--active { color: #fff; background: var(--green); animation: pulse 1.6s ease-in-out infinite; }
+.n-agent__status--done { color: var(--text-3); background: var(--bg); }
+.n-agent__toggle { font-size: 10px; color: var(--text-3); padding: 2px 4px; }
+
+.n-agent__answer {
+  padding: 8px 12px; border-top: 1px solid var(--agent-bdr);
+  cursor: pointer; transition: background .1s;
+}
+.n-agent__answer:hover { background: rgba(0,0,0,.02); }
+.n-agent__answer-hdr {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: var(--text-3); margin-bottom: 4px;
+}
+.n-agent__answer-icon { font-size: 12px; }
+.n-agent__answer-label { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.n-agent__answer-text {
+  font-size: 11px; color: var(--text-2); line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 200px; overflow-y: auto;
+  font-family: var(--font-ui);
+}
+
+.n-agent__children {
+  padding: 10px 10px 10px 16px;
+  border-left: 3px solid var(--agent-bdr);
+  margin-left: 14px;
+  background: rgba(37, 99, 235, 0.02);
+  border-bottom-left-radius: 6px;
+}
+
+.n-skill__children {
+  padding: 8px 8px 8px 14px;
+  border-left: 3px solid #ddd6fe;
+  margin-left: 12px;
+  background: rgba(124, 58, 237, 0.015);
+  border-bottom-left-radius: 6px;
+}
+
+.n-leaf__children {
+  padding-left: 20px;
+  border-left: 2px solid var(--border);
+  margin-left: 12px;
+}
+
+.n-leaf--expandable { cursor: pointer; }
+.n-leaf__toggle {
+  font-size: 10px; color: var(--text-3); flex-shrink: 0;
+  padding: 2px 4px;
+}
+
+/* ── Leaf node (compact — single row) ─────────────────────────────────────── */
+.n-leaf {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 5px;
+  margin-bottom: 1px; font-size: 11px;
+  transition: background .1s;
+  min-height: 28px;
+}
+.n-leaf:hover { background: rgba(0,0,0,.03); }
+.n-leaf__tag {
+  font-size: 9px; font-weight: 600; font-family: var(--font-mono);
+  padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+  text-transform: uppercase; letter-spacing: .02em;
+  white-space: nowrap;
+}
+/* Leaf tag colors */
+.ltag-bash  { background: #f1f5f9; color: #334155; }
+.ltag-read  { background: #f1f5f9; color: #64748b; }
+.ltag-glob  { background: #f1f5f9; color: #64748b; }
+.ltag-grep  { background: #f1f5f9; color: #64748b; }
+.ltag-edit  { background: #fef9c3; color: #92400e; }
+.ltag-write { background: #ffedd5; color: #9a3412; }
+.ltag-skill { background: #f3e8ff; color: #6b21a8; }
+.ltag-sendmessage { background: #fef3c7; color: #92400e; }
+.ltag-taskcreate { background: #dcfce7; color: #166534; }
+.ltag-taskupdate { background: #dcfce7; color: #166534; }
+.ltag-command { background: #e0e7ff; color: #3730a3; }
+.ltag-user  { background: #dbeafe; color: #1e40af; font-weight: 600; }
+.ltag-mcp   { background: #ecfeff; color: #155e75; }
+.ltag-default { background: #f1f5f9; color: #64748b; }
+
+.n-leaf__label {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--text-2);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.n-leaf__tokens {
+  font-size: 10px; font-family: var(--font-mono); color: var(--text-3);
+  display: flex; gap: 3px; flex-shrink: 0;
+}
+.n-leaf__tokens .t-in  { color: #2563eb; }
+.n-leaf__tokens .t-out { color: #16a34a; }
+.n-leaf__tokens .t-dur { color: var(--text-3); }
+.n-leaf__resp-btn {
+  font-size: 9px; color: var(--text-3); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 1px 6px; flex-shrink: 0; transition: all .1s;
+}
+.n-leaf__resp-btn:hover { border-color: var(--border-2); color: var(--text-2); }
+.n-leaf__status { font-size: 9px; font-weight: 600; color: var(--green); animation: pulse 1.6s ease-in-out infinite; }
+
+.n-leaf__resp {
+  margin: 2px 0 4px 40px; padding: 6px 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; font-size: 10px; font-family: var(--font-mono);
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 160px; overflow-y: auto; color: var(--text-2);
+  line-height: 1.5;
+}
+
+/* ── Command group (grouped leaf operations) ──────────────────────────────── */
+.n-cmdgroup {
+  margin-bottom: 2px; border: 1px solid var(--border); border-radius: 6px;
+  overflow: hidden; background: var(--bg-white);
+}
+.n-cmdgroup__hdr {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; cursor: pointer; user-select: none;
+  background: var(--bg); font-size: 11px;
+}
+.n-cmdgroup__count {
+  font-weight: 600; color: var(--text-2); font-size: 11px;
+}
+.n-cmdgroup__tools {
+  display: flex; gap: 4px; flex-wrap: wrap; flex: 1; align-items: center;
+}
+.n-cmdgroup__pill {
+  font-size: 9px; font-weight: 500; padding: 1px 5px; border-radius: 3px;
+  font-family: var(--font-mono);
+}
+.n-cmdgroup__tokens {
+  font-size: 10px; font-family: var(--font-mono); color: var(--text-3); flex-shrink: 0;
+}
+.n-cmdgroup__tokens .t-in { color: #2563eb; }
+.n-cmdgroup__chev { font-size: 9px; color: var(--text-3); flex-shrink: 0; }
+.n-cmdgroup__body { padding: 4px 4px 4px 8px; }
+
+/* ── Parallel group ──────────────────────────────────────────────────────── */
+.n-parallel {
+  border: 2px dashed var(--agent); border-radius: var(--radius);
+  padding: 12px; margin-bottom: 8px;
+  background: linear-gradient(135deg, rgba(37,99,235,.02) 0%, rgba(37,99,235,.05) 100%);
+}
+.n-parallel__hdr {
+  font-size: 11px; font-weight: 700; color: var(--agent);
+  margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--agent-bdr);
+}
+.n-parallel__hdr::before { content: '\u2225'; font-size: 14px; }
+.n-parallel__cols { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; }
+.n-parallel__col {
+  flex: 1; min-width: 280px;
+  border-left: 2px solid var(--agent-bdr); padding-left: 10px;
+}
+.n-parallel__col:first-child { border-left: none; padding-left: 0; }
+
+/* ── Skill node (like agent but purple) ──────────────────────────────────── */
+.n-skill {
+  margin-bottom: 4px; border-radius: var(--radius);
+  border: 1px solid #ddd6fe; background: var(--bg-white); overflow: hidden;
+}
+.n-skill__hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; cursor: pointer; user-select: none;
+  background: var(--skill-bg); border-bottom: 1px solid #ddd6fe;
+}
+.n-skill__icon {
+  width: 20px; height: 20px; border-radius: 4px;
+  background: var(--skill); color: #fff; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; flex-shrink: 0;
+}
+
+/* ── Root node ────────────────────────────────────────────────────────────── */
+.n-root {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+}
+.n-root__badge {
+  width: 32px; height: 32px; border-radius: 50%; background: var(--text);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+}
+.n-root__label { font-weight: 700; font-size: 14px; color: var(--text); }
+.n-root__time { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+
+/* ── Events table ─────────────────────────────────────────────────────────── */
+.events-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.events-filters {
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+  background: var(--bg-white);
+}
+.events-search {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text); font-size: 11px; padding: 4px 10px; outline: none;
+  width: 180px; transition: border-color .15s;
+}
+.events-search:focus { border-color: var(--agent); box-shadow: 0 0 0 2px rgba(37,99,235,.08); }
+.events-search::placeholder { color: var(--text-3); }
+.filter-select {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text); font-size: 11px; padding: 4px 8px; outline: none;
+}
+.filter-toggle {
+  font-size: 10px; padding: 3px 8px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--bg-white); color: var(--text-3);
+  transition: all .1s;
+}
+.filter-toggle--on { color: var(--agent); border-color: var(--agent); background: #eff6ff; }
+
+.events-table { flex: 1; overflow: auto; background: var(--bg-white); }
+.events-table table { width: 100%; border-collapse: collapse; }
+.events-table thead { position: sticky; top: 0; z-index: 2; }
+.events-table th {
+  padding: 6px 12px; text-align: left; font-size: 10px; font-weight: 600;
+  color: var(--text-3); text-transform: uppercase; letter-spacing: .04em;
+  background: var(--bg-white); border-bottom: 2px solid var(--border);
+}
+.events-table td { padding: 5px 12px; border-bottom: 1px solid #f1f5f9; font-size: 11px; }
+.events-table tr { transition: background .08s; cursor: pointer; }
+.events-table tr:hover { background: var(--bg-hover); }
+.evt-time { color: var(--text-3); font-family: var(--font-mono); white-space: nowrap; }
+.evt-dir  { color: var(--text-3); width: 20px; text-align: center; }
+.evt-tool { font-weight: 600; white-space: nowrap; }
+.evt-summary { color: var(--text-2); font-family: var(--font-mono); font-size: 11px;
+               max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evt-tokens { font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
+.evt-tokens .t-in  { color: #2563eb; }
+.evt-tokens .t-out { color: #16a34a; }
+.evt-resp td { padding: 0; }
+.evt-resp__body {
+  padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.evt-resp__body pre {
+  font-family: var(--font-mono); font-size: 10px; white-space: pre-wrap;
+  word-break: break-all; max-height: 200px; overflow-y: auto; color: var(--text-2); line-height: 1.5;
+}
+
+/* Tool colors for event rows */
+.evt-row--agent   .evt-tool { color: var(--agent); }
+.evt-row--skill   .evt-tool { color: var(--skill); }
+.evt-row--bash    .evt-tool { color: var(--bash); }
+.evt-row--read    .evt-tool, .evt-row--glob .evt-tool, .evt-row--grep .evt-tool { color: var(--read); }
+.evt-row--edit    .evt-tool, .evt-row--write .evt-tool { color: var(--edit); }
+.evt-row--sendmessage .evt-tool { color: var(--send); }
+.evt-row--command .evt-tool { color: var(--cmd); }
+.evt-row--mcp     .evt-tool { color: var(--mcp); }
+.evt-row--taskcreate .evt-tool, .evt-row--taskupdate .evt-tool { color: var(--task); }
+.evt-row--user    .evt-tool { color: #1e40af; font-weight: 600; }
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+.empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; gap: 8px; color: var(--text-3);
+}
+
+/* ── Session delete ──────────────────────────────────────────────────────── */
+.sess__del {
+  opacity: 0; margin-left: auto; flex-shrink: 0;
+  width: 18px; height: 18px; border-radius: 4px;
+  border: none; background: transparent; color: var(--text-3);
+  cursor: pointer; font-size: 12px; display: flex;
+  align-items: center; justify-content: center;
+  transition: all .12s;
+}
+.sess:hover .sess__del { opacity: 1; }
+.sess__del:hover { background: #fef2f2; color: var(--red); }
+.sess__check {
+  width: 14px; height: 14px; accent-color: var(--agent); flex-shrink: 0;
+  cursor: pointer; margin-right: -2px;
+}
+.sidebar__selbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px; border-top: 1px solid var(--border);
+  background: var(--bg-white); flex-shrink: 0;
+}
+.sidebar__selbar-count { font-size: 11px; font-weight: 500; color: var(--text-2); }
+.sidebar__selbar-btn {
+  font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--bg-white);
+  color: var(--text-2); cursor: pointer; transition: all .12s;
+}
+.sidebar__selbar-btn:hover { border-color: var(--border-2); color: var(--text); }
+.sidebar__selbar-btn--del {
+  border-color: var(--red); background: var(--red); color: #fff; margin-left: auto;
+}
+.sidebar__selbar-btn--del:hover { background: #b91c1c; }
+.sidebar__selbar-btn--done {
+  border-color: var(--agent); color: var(--agent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BPMN / Process View
+   ══════════════════════════════════════════════════════════════════════════ */
+.bp-wrap { flex: 1; overflow: auto; padding: 24px 32px; background: var(--bg); }
+.bp-flow { display: flex; flex-direction: column; align-items: center; min-width: fit-content; }
+
+/* Connector line */
+.bp-conn { width: 2px; height: 18px; background: var(--border-2); flex-shrink: 0; }
+
+/* Start / End circles */
+.bp-event {
+  width: 28px; height: 28px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
+  flex-shrink: 0;
+}
+.bp-event--start { border: 2px solid var(--green); color: var(--green); }
+.bp-event--end   { border: 3px solid var(--text-3); color: var(--text-3); }
+
+/* Gateway diamond */
+.bp-gateway {
+  width: 24px; height: 24px; transform: rotate(45deg);
+  border: 2px solid var(--agent); background: var(--bg-white);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin: 2px 0;
+}
+.bp-gateway__inner { transform: rotate(-45deg); font-size: 9px; font-weight: 700; color: var(--agent); }
+
+/* Task node */
+.bp-task {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 6px; border: 1.5px solid var(--border);
+  background: var(--bg-white); min-width: 160px; max-width: 340px;
+  font-size: 11px; transition: border-color .12s, box-shadow .12s;
+}
+.bp-task:hover { border-color: var(--border-2); box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.bp-task__icon {
+  width: 22px; height: 22px; border-radius: 5px; display: flex;
+  align-items: center; justify-content: center; font-size: 10px;
+  font-weight: 700; flex-shrink: 0; color: #fff;
+}
+.bp-task__body { flex: 1; min-width: 0; overflow: hidden; }
+.bp-task__type { font-size: 9px; font-weight: 600; text-transform: uppercase;
+                 letter-spacing: .04em; color: var(--text-3); }
+.bp-task__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                  color: var(--text); font-family: var(--font-mono); font-size: 11px; }
+.bp-task__status { font-size: 8px; animation: pulse 1.6s ease-in-out infinite; }
+
+.bp-task--agent  { border-color: var(--agent-bdr); background: var(--agent-bg); }
+.bp-task--agent .bp-task__icon { background: var(--agent); }
+.bp-task--agent .bp-task__type { color: var(--agent); }
+
+.bp-task--skill  { border-color: #ddd6fe; background: var(--skill-bg); }
+.bp-task--skill .bp-task__icon { background: var(--skill); }
+.bp-task--skill .bp-task__type { color: var(--skill); }
+
+.bp-task--user   { border-color: #93c5fd; background: #eff6ff; }
+.bp-task--user .bp-task__icon { background: #2563eb; }
+
+.bp-task--bash .bp-task__icon   { background: var(--bash); }
+.bp-task--read .bp-task__icon   { background: #64748b; }
+.bp-task--edit .bp-task__icon   { background: #ca8a04; }
+.bp-task--send .bp-task__icon   { background: #d97706; }
+.bp-task--mcp  .bp-task__icon   { background: #0891b2; }
+.bp-task--default .bp-task__icon { background: #94a3b8; }
+
+/* Sub-process container (agent/skill with children) */
+.bp-subprocess {
+  border: 2px solid var(--agent-bdr); border-radius: 10px;
+  background: rgba(37,99,235,.02); padding: 0 0 12px 0;
+  min-width: 200px; position: relative;
+}
+.bp-subprocess--skill { border-color: #ddd6fe; background: rgba(124,58,237,.015); }
+.bp-subprocess__hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; font-size: 11px; font-weight: 600;
+  border-bottom: 1px solid var(--agent-bdr); cursor: default;
+}
+.bp-subprocess--skill .bp-subprocess__hdr { border-color: #ddd6fe; }
+.bp-subprocess__icon {
+  width: 20px; height: 20px; border-radius: 4px; display: flex;
+  align-items: center; justify-content: center; font-size: 10px;
+  font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.bp-subprocess__icon--agent { background: var(--agent); }
+.bp-subprocess__icon--skill { background: var(--skill); }
+.bp-subprocess__name { color: var(--agent); }
+.bp-subprocess--skill .bp-subprocess__name { color: var(--skill); }
+.bp-subprocess__desc { color: var(--text-2); font-weight: 400; flex: 1;
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-subprocess__body { display: flex; flex-direction: column; align-items: center; padding-top: 10px; }
+
+/* Parallel branches */
+.bp-parallel { display: flex; gap: 16px; align-items: flex-start; }
+.bp-branch {
+  display: flex; flex-direction: column; align-items: center;
+  position: relative; min-width: 180px;
+}
+/* Horizontal connectors from gateway to branches */
+.bp-fork-lines {
+  display: flex; align-items: flex-start; width: 100%; position: relative;
+  justify-content: center;
+}
+.bp-fork-lines::before {
+  content: ''; position: absolute; top: 0;
+  left: calc(50% - var(--half-w, 100px)); right: calc(50% - var(--half-w, 100px));
+  height: 2px; background: var(--border-2);
+}
+.bp-fork-arm { width: 2px; height: 14px; background: var(--border-2); }
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+
+/* ── Keyboard hint ───────────────────────────────────────────────────────── */
+.kb-hint {
+  position: fixed; bottom: 6px; right: 12px; font-size: 9px;
+  color: var(--text-3); opacity: .5; pointer-events: none;
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══ Top Bar ═══════════════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <span class="topbar__logo"><span>Claude</span> Flow</span>
+    <span class="topbar__session" v-if="activeSession">{{ activeSession.length > 28 ? activeSession.slice(0,28)+'...' : activeSession }}</span>
+    <div :class="['topbar__live', liveConnected ? 'topbar__live--on' : 'topbar__live--off']">
+      <div :class="['topbar__dot', liveConnected ? 'topbar__dot--on' : 'topbar__dot--off']"></div>
+      {{ liveConnected ? 'LIVE' : 'OFF' }}
+    </div>
+  </header>
+
+  <!-- ═══ Main ═══════════════════════════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar__hdr">
+        <span class="sidebar__title">Sessions</span>
+        <input class="sidebar__search" type="text" placeholder="Search..."
+               v-model="sessionSearch" ref="searchInput" />
+      </div>
+      <div class="sidebar__list">
+        <template v-for="grp in filteredProjectGroups" :key="grp.project">
+          <div class="proj-hdr" @click="toggleProject(grp.project)">
+            <span class="proj-hdr__chev">{{ collapsedProjects[grp.project] ? '\u25B6' : '\u25BC' }}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              {{ grp.project || '(default)' }}
+            </span>
+            <span class="proj-hdr__count">{{ grp.sessions.length }}</span>
+          </div>
+          <template v-if="!collapsedProjects[grp.project]">
+            <template v-for="(dg, di) in groupByDate(grp.sessions)" :key="di">
+              <div class="date-hdr">{{ dg.label }}</div>
+              <div v-for="s in dg.sessions" :key="s.session_id"
+                   :class="['sess', s.session_id === activeSession && !selectMode ? 'sess--active' : '']"
+                   @click="selectMode ? toggleSessionSelect(s.session_id) : selectSession(s.session_id)">
+                <input v-if="selectMode" type="checkbox" class="sess__check"
+                       :checked="selectedSessions.has(s.session_id)"
+                       @click.stop="toggleSessionSelect(s.session_id)" />
+                <span class="sess__time">{{ timeOf(s.first_ts) }}</span>
+                <span class="sess__arrow">&rarr;</span>
+                <span class="sess__end">{{ timeOf(s.last_ts) }}</span>
+                <span class="sess__count">{{ s.event_count }}ev</span>
+                <span v-if="s.is_active" class="sess__live">LIVE</span>
+                <button v-if="!selectMode" class="sess__del" @click.stop="deleteSingleSession(s.session_id)"
+                        title="Delete session">&times;</button>
+              </div>
+            </template>
+          </template>
+        </template>
+        <div v-if="!sessions.length" class="empty" style="height:auto;padding:24px 12px;font-size:11px">
+          No sessions yet
+        </div>
+      </div>
+      <!-- Select mode action bar -->
+      <div v-if="selectMode" class="sidebar__selbar">
+        <span class="sidebar__selbar-count">{{ selectedSessions.size }} selected</span>
+        <button class="sidebar__selbar-btn" @click="selectAllVisible">Select all</button>
+        <button class="sidebar__selbar-btn sidebar__selbar-btn--del"
+                v-if="selectedSessions.size"
+                @click="deleteSelectedSessions">Delete {{ selectedSessions.size }}</button>
+        <button class="sidebar__selbar-btn sidebar__selbar-btn--done"
+                @click="toggleSelectMode">Done</button>
+      </div>
+      <!-- Bulk actions footer (normal mode) -->
+      <div v-else-if="sessions.length > 1" class="sidebar__selbar" style="justify-content:flex-end">
+        <button class="sidebar__selbar-btn" @click="toggleSelectMode">Select...</button>
+      </div>
+    </aside>
+
+    <!-- Right panel -->
+    <div class="right">
+      <!-- Stats HUD -->
+      <div class="hud" v-if="stats && stats.tokens">
+        <span class="hud__label">Tokens</span>
+        <span class="hud__pill hud__pill--in" v-if="stats.tokens.input">&uarr; {{ fmtK(stats.tokens.input) }}</span>
+        <span class="hud__pill hud__pill--out" v-if="stats.tokens.output">&darr; {{ fmtK(stats.tokens.output) }}</span>
+        <span class="hud__pill hud__pill--cr" v-if="stats.tokens.cache_read">&larrhk; {{ fmtK(stats.tokens.cache_read) }}</span>
+        <span class="hud__pill hud__pill--cc" v-if="stats.tokens.cache_create">cache {{ fmtK(stats.tokens.cache_create) }}</span>
+        <span class="hud__sep" v-if="estimatedCost"></span>
+        <span class="hud__pill hud__pill--cost" v-if="estimatedCost">~${{ estimatedCost }}</span>
+        <span class="hud__sep" v-if="topTools.length"></span>
+        <template v-for="[t,c] in topTools" :key="t">
+          <span class="hud__tool">{{ t }} &times;{{ c }}</span>
+        </template>
+        <span class="hud__children" v-if="stats.child_sessions?.length">
+          {{ stats.child_sessions.length }} subagent{{ stats.child_sessions.length > 1 ? 's' : '' }}
+        </span>
+        <span class="hud__duration" v-if="sessionDuration">{{ sessionDuration }}</span>
+      </div>
+
+      <!-- Tab bar -->
+      <div class="tabs">
+        <button :class="['tab', tab==='tree' ? 'tab--active' : '']" @click="tab='tree'">
+          Flow Tree<span class="tab__count" v-if="entries.length">({{ entries.length }})</span>
+        </button>
+        <button :class="['tab', tab==='process' ? 'tab--active' : '']" @click="tab='process'">
+          Process
+        </button>
+        <button :class="['tab', tab==='events' ? 'tab--active' : '']" @click="tab='events'">
+          Events<span class="tab__count" v-if="entries.length">({{ filteredEvents.length }})</span>
+        </button>
+        <div class="tab-tools" v-if="tab==='tree'">
+          <button class="tab-btn" @click="expandAll">Expand all</button>
+          <button class="tab-btn" @click="collapseAll">Collapse all</button>
+          <button :class="['tab-btn', autoScroll ? 'tab-btn--active' : '']"
+                  @click="autoScroll=!autoScroll">Auto-scroll</button>
+        </div>
+      </div>
+
+      <!-- Tree view -->
+      <div v-show="tab==='tree'" class="tree-wrap" ref="treeWrap">
+        <div v-if="!activeSession" class="empty">Select a session from the sidebar</div>
+        <div v-else-if="!tree" class="empty">Loading...</div>
+        <template v-else>
+          <div class="n-root">
+            <div class="n-root__badge">C</div>
+            <span class="n-root__label">Claude</span>
+            <span class="n-root__time">{{ fmtT(tree.ts) }} UTC</span>
+          </div>
+          <flow-node v-for="child in tree.children" :key="child.id"
+                     :node="child" :token-index="tokenIndex" :depth="0"
+                     :expanded-set="expandedSet"
+                     @toggle="onToggleNode" />
+        </template>
+      </div>
+
+      <!-- Process / BPMN view -->
+      <div v-show="tab==='process'" class="bp-wrap">
+        <div v-if="!activeSession" class="empty">Select a session from the sidebar</div>
+        <div v-else-if="!tree" class="empty">Loading...</div>
+        <div v-else class="bp-flow">
+          <div class="bp-event bp-event--start">&#x25B6;</div>
+          <process-node v-for="child in tree.children" :key="child.id" :node="child" />
+          <div class="bp-conn"></div>
+          <div class="bp-event bp-event--end">&#x25A0;</div>
+        </div>
+      </div>
+
+      <!-- Events view -->
+      <div v-show="tab==='events'" class="events-wrap">
+        <div class="events-filters">
+          <input class="events-search" type="text" placeholder="Search events..." v-model="eventSearch" />
+          <select class="filter-select" v-model="eventToolFilter">
+            <option value="">All tools</option>
+            <option v-for="t in availableTools" :key="t" :value="t">{{ t }}</option>
+          </select>
+          <button :class="['filter-toggle', eventDirFilter.pre ? 'filter-toggle--on' : '']"
+                  @click="eventDirFilter.pre=!eventDirFilter.pre">&rarr; pre</button>
+          <button :class="['filter-toggle', eventDirFilter.post ? 'filter-toggle--on' : '']"
+                  @click="eventDirFilter.post=!eventDirFilter.post">&larr; post</button>
+          <button :class="['filter-toggle', eventDirFilter.command ? 'filter-toggle--on' : '']"
+                  @click="eventDirFilter.command=!eventDirFilter.command">&#9889; cmd</button>
+          <button :class="['filter-toggle', eventDirFilter.prompt ? 'filter-toggle--on' : '']"
+                  @click="eventDirFilter.prompt=!eventDirFilter.prompt">&#9997; prompt</button>
+        </div>
+        <div class="events-table" ref="eventsTable">
+          <table>
+            <thead><tr>
+              <th style="width:70px">Time</th>
+              <th style="width:20px"></th>
+              <th style="width:90px">Tool</th>
+              <th>Summary</th>
+              <th style="width:90px">Tokens</th>
+            </tr></thead>
+            <tbody>
+              <template v-for="(e, i) in filteredEvents" :key="i">
+                <tr :class="'evt-row--'+toolClass(e.tool)" @click="toggleEventResp(e._idx)">
+                  <td class="evt-time">{{ e.ts ? e.ts.slice(11,19) : '' }}</td>
+                  <td class="evt-dir">{{ e.event==='pre' ? '\u2192' : e.event==='prompt' ? '\u270D' : e.event==='command' ? '\u26A1' : '\u2190' }}</td>
+                  <td class="evt-tool">{{ e.tool }}</td>
+                  <td class="evt-summary" :title="summarise(e)">{{ summarise(e) }}</td>
+                  <td class="evt-tokens">
+                    <span v-if="e.tokens?.input" class="t-in">&uarr;{{ fmtK(e.tokens.input) }}</span>
+                    <span v-if="e.tokens?.output" class="t-out"> &darr;{{ fmtK(e.tokens.output) }}</span>
+                  </td>
+                </tr>
+                <tr v-if="openResps[e._idx]" class="evt-resp">
+                  <td colspan="5"><div class="evt-resp__body"><pre>{{ fmtResp(e.response) }}</pre></div></td>
+                </tr>
+              </template>
+              <tr v-if="!filteredEvents.length">
+                <td colspan="5" style="padding:16px;color:var(--text-3)">
+                  {{ entries.length ? 'No matching events' : 'No events yet' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="kb-hint">j/k navigate &middot; space expand &middot; t/p/e tabs &middot; / search &middot; esc collapse</div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   JavaScript — Claude Flow Dashboard
+   ═══════════════════════════════════════════════════════════════════════════ */
+const { createApp, ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, shallowRef } = Vue;
+
+// ─── Utilities ───────────────────────────────────────────────────────────
+function fmtK(n) {
+  if (!n) return '0';
+  if (n >= 1_000_000) return (Math.round(n / 100_000) / 10) + 'M';
+  if (n >= 1000) return (Math.round(n / 100) / 10) + 'k';
+  return String(n);
+}
+function fmtT(ts) { return ts ? ts.slice(11, 19) : ''; }
+
+const CONTAINER_TOOLS = new Set(['Agent', 'Skill', 'Bash']);
+
+function getLabel(node) {
+  if (node.cmd) return node.cmd;
+  const i = node.input || {};
+  switch (node.tool) {
+    case 'Agent':       return `${i.agent || 'general-purpose'}${i.name ? ' ['+i.name+']' : ''}`;
+    case 'Skill':       return `${i.skill||''}${i.args?' '+i.args:''}`;
+    case 'SendMessage': return `\u2192 ${i.to||''}: ${(i.message||'').slice(0,80)}`;
+    case 'TaskCreate':  return i.title || '';
+    case 'TaskUpdate':  return `${i.id||''} \u2192 ${i.status||''}`;
+    case 'Read': case 'Glob': case 'Grep':
+      return (i.file_path||i.path||i.pattern||'').split('/').slice(-2).join('/');
+    case 'Bash': return i.description || (i.command||'').slice(0,80) || '';
+    case 'Edit': case 'Write': return (i.file_path||'').split('/').slice(-2).join('/');
+    case 'Command': return `${i.command||''} ${i.args||''}`.trim();
+    case 'User': return (i.message||'').slice(0,120);
+    default:
+      if (node.tool?.startsWith('mcp__')) return node.tool.replace(/^mcp__[^_]+__/, '');
+      return '';
+  }
+}
+
+function getDescription(node) {
+  const i = node.input || {};
+  if (node.tool === 'Agent' && i.description) return i.description;
+  if (node.tool === 'Skill' && i.args) return i.args;
+  if (node.tool === 'SendMessage' && i.message) return String(i.message).slice(0, 200);
+  if (node.tool === 'Bash' && i.command) return String(i.command).slice(0, 200);
+  if (node.tool === 'Command' && i.args) return i.args;
+  return '';
+}
+
+function extractContentText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(b => b && (b.type === 'text' || typeof b === 'string'))
+      .map(b => typeof b === 'string' ? b : (b.text || ''))
+      .join('\n');
+  }
+  return String(content);
+}
+
+function formatResponse(r) {
+  if (!r || r === '') return '';
+  if (typeof r === 'object') {
+    if (r.stdout != null || r.stderr != null) {
+      const parts = [];
+      if (r.exit_code != null && r.exit_code !== 0) parts.push('exit: ' + r.exit_code);
+      if (r.stdout) parts.push(String(r.stdout).slice(0, 500));
+      if (r.stderr) parts.push('stderr: ' + String(r.stderr).slice(0, 200));
+      return parts.join('\n');
+    }
+    if (r.files) return `${r.count||0} files: ${Array.isArray(r.files)?r.files.join(', '):r.files}`;
+    if (r.matches) return `${r.num_files||0} files matched\n${r.matches}`;
+    // Agent/Skill responses: extract text from content blocks
+    if (r.content) return extractContentText(r.content).slice(0, 2000);
+    return JSON.stringify(r, null, 2).slice(0, 600);
+  }
+  return String(r).slice(0, 600);
+}
+
+function leafTagClass(tool) {
+  if (!tool) return 'ltag-default';
+  if (tool.startsWith('mcp__')) return 'ltag-mcp';
+  const m = { Bash:'ltag-bash', Read:'ltag-read', Glob:'ltag-glob', Grep:'ltag-grep',
+              Edit:'ltag-edit', Write:'ltag-write', Skill:'ltag-skill',
+              SendMessage:'ltag-sendmessage', TaskCreate:'ltag-taskcreate',
+              TaskUpdate:'ltag-taskupdate', Command:'ltag-command', User:'ltag-user' };
+  return m[tool] || 'ltag-default';
+}
+
+// ─── Tree Builder ────────────────────────────────────────────────────────
+function buildTree(entries) {
+  const root = { id:'root', tool:'Claude', children:[], status:'root',
+                 input:{}, ts:entries[0]?.ts||'', response:null, postTs:null, cmd:'', tokens:null };
+  const nodeMap = new Map();
+  const hasParentIds = entries.some(e => e.parent_id);
+  if (hasParentIds) _buildById(entries, root, nodeMap);
+  else _buildHeuristic(entries, root, nodeMap);
+  return { root, nodeMap };
+}
+
+function _buildById(entries, root, nodeMap) {
+  nodeMap.set('root', root); nodeMap.set(null, root); nodeMap.set(undefined, root);
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.event !== 'pre' && e.event !== 'command' && e.event !== 'prompt') continue;
+    const node = { id:e.action_id||`i${i}`, tool:e.tool, input:e.input||{}, ts:e.ts,
+                   cmd:e.cmd||'', tokens:e.tokens||null,
+                   status:CONTAINER_TOOLS.has(e.tool)?'active':'done',
+                   children:[], response:null, postTs:null, parallel:false, parentId:e.parent_id||null };
+    nodeMap.set(node.id, node);
+    const par = nodeMap.get(e.parent_id) || root;
+    node.parentId = par.id;
+    if (e.tool === 'Agent') {
+      const sib = par.children.find(c => c.tool === 'Agent' && c.status === 'active');
+      if (sib) { node.parallel = true;
+        par.children.filter(c => c.tool==='Agent'&&(c.status==='active'||c.parallel)).forEach(c => c.parallel=true); }
+    }
+    par.children.push(node);
+  }
+  for (const e of entries) {
+    if (e.event !== 'post') continue;
+    const node = nodeMap.get(e.action_id);
+    if (!node) continue;
+    node.status = 'done'; node.response = e.response ?? ''; node.postTs = e.ts;
+    if (e.tokens) node.tokens = e.tokens;
+  }
+}
+
+function _buildHeuristic(entries, root, nodeMap) {
+  nodeMap.set('root', root);
+  const stack = [root], openAgents = [];
+  const agentKey = inp => `${inp?.agent||''}::${inp?.name||''}`;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.event === 'post') {
+      // Try exact action_id match first (when tool_use_id is available)
+      if (e.action_id && nodeMap.has(e.action_id)) {
+        const node = nodeMap.get(e.action_id);
+        node.status='done'; node.response=e.response??''; node.postTs=e.ts;
+        if (e.tokens) node.tokens=e.tokens;
+        if (node.tool==='Agent') {
+          const mi = openAgents.indexOf(node); if (mi!==-1) openAgents.splice(mi,1);
+          const si = stack.indexOf(node); if (si!==-1) stack.splice(si,1);
+        }
+        continue;
+      }
+      // Fallback: heuristic matching by tool name
+      if (e.tool === 'Agent') {
+        const key = agentKey(e.input);
+        let mi = -1;
+        for (let j = openAgents.length-1; j >= 0; j--) { if (agentKey(openAgents[j].input)===key) { mi=j; break; } }
+        if (mi===-1 && openAgents.length) mi = openAgents.length-1;
+        if (mi!==-1) {
+          const n = openAgents[mi]; n.status='done'; n.response=e.response??''; n.postTs=e.ts;
+          if (e.tokens) n.tokens=e.tokens; openAgents.splice(mi,1);
+          const si = stack.indexOf(n); if (si!==-1) stack.splice(si,1);
+        }
+      } else {
+        for (let j = stack.length-1; j >= 0; j--) {
+          let found = false;
+          for (let k = stack[j].children.length-1; k >= 0; k--) {
+            const c = stack[j].children[k];
+            if (c.tool===e.tool && c.status==='pending') {
+              c.status='done'; c.response=e.response??''; c.postTs=e.ts;
+              if (e.tokens) c.tokens=e.tokens; found=true; break;
+            }
+          }
+          if (found) break;
+        }
+      }
+      continue;
+    }
+    if (e.event === 'command' || e.event === 'prompt') {
+      const n = { id:e.action_id||`i${i}`, tool:e.tool||'Command', input:e.input||{}, ts:e.ts, cmd:e.cmd||'',
+                  tokens:e.tokens||null, status:'done', children:[], response:null, postTs:null,
+                  parallel:false, parentId:root.id };
+      nodeMap.set(n.id, n); root.children.push(n); continue;
+    }
+    if (e.tool === 'Agent') {
+      let pi = stack.length-1;
+      // Walk up past active agents that were spawned in the same batch (within 30s)
+      // to correctly detect parallel agents as siblings, not parent-child
+      const eMs = new Date(e.ts).getTime();
+      while (pi > 0 && stack[pi].tool === 'Agent' && stack[pi].status === 'active') {
+        const gap = (eMs - new Date(stack[pi].ts).getTime()) / 1000;
+        if (gap < 30) pi--;  // Close in time → parallel sibling, go to common parent
+        else break;          // Far apart → likely a sub-agent of this one
+      }
+      const par = stack[pi];
+      const n = { id:e.action_id||`i${i}`, tool:'Agent', input:e.input||{}, ts:e.ts, cmd:e.cmd||'',
+                  tokens:e.tokens||null, status:'active', children:[], response:null, postTs:null,
+                  parallel:false, parentId:par.id };
+      const sib = par.children.find(c=>c.tool==='Agent'&&c.status==='active');
+      if (sib) { n.parallel=true; par.children.filter(c=>c.tool==='Agent'&&(c.status==='active'||c.parallel)).forEach(c=>c.parallel=true); }
+      nodeMap.set(n.id, n); par.children.push(n); openAgents.push(n); stack.push(n);
+    } else {
+      const par = stack[stack.length-1];
+      const np = e.tool==='Skill'||e.tool==='SendMessage';
+      const n = { id:e.action_id||`i${i}`, tool:e.tool, input:e.input||{}, ts:e.ts, cmd:e.cmd||'',
+                  tokens:e.tokens||null, status:np?'pending':'done',
+                  children:[], response:null, postTs:null, parallel:false, parentId:par.id };
+      nodeMap.set(n.id, n); par.children.push(n);
+    }
+  }
+}
+
+// ─── Incremental Patch ───────────────────────────────────────────────────
+function patchTree(root, nodeMap, entry) {
+  if (entry.event === 'pre' || entry.event === 'command' || entry.event === 'prompt') {
+    const node = { id:entry.action_id||`rt${Date.now()}`, tool:entry.event==='command'?(entry.tool||'Command'):entry.tool,
+                   input:entry.input||{}, ts:entry.ts, cmd:entry.cmd||'', tokens:entry.tokens||null,
+                   status:entry.event==='command'?'done':(CONTAINER_TOOLS.has(entry.tool)?'active':'done'),
+                   children:[], response:null, postTs:null, parallel:false, parentId:entry.parent_id||'root' };
+    nodeMap.set(node.id, node);
+    const par = nodeMap.get(entry.parent_id) || root;
+    node.parentId = par.id;
+    if (entry.tool === 'Agent') {
+      const sib = par.children.find(c => c.tool==='Agent' && c.status==='active');
+      if (sib) { node.parallel=true; par.children.filter(c=>c.tool==='Agent'&&(c.status==='active'||c.parallel)).forEach(c=>c.parallel=true); }
+    }
+    par.children.push(node);
+    return true;
+  }
+  if (entry.event === 'post') {
+    const node = nodeMap.get(entry.action_id);
+    if (node) { node.status='done'; node.response=entry.response??''; node.postTs=entry.ts; if (entry.tokens) node.tokens=entry.tokens; return true; }
+  }
+  return false;
+}
+
+// ─── Token Index (binary search) ─────────────────────────────────────────
+function buildTokenIndex(entries, timeline) {
+  const idx = new Map();
+  if (!timeline?.length) return idx;
+  const tl = timeline.filter(m=>m.ts).map(m=>({...m, _ms:new Date(m.ts).getTime()})).sort((a,b)=>a._ms-b._ms);
+  if (!tl.length) return idx;
+  function closest(targetMs, filterFn) {
+    let lo=0, hi=tl.length-1, best=null, bestDiff=Infinity;
+    while (lo<=hi) { const mid=(lo+hi)>>1; if (tl[mid]._ms<targetMs) lo=mid+1; else hi=mid-1; }
+    const start=Math.max(0,lo-10), end=Math.min(tl.length-1,lo+10);
+    for (let i=start; i<=end; i++) {
+      const diff=Math.abs(tl[i]._ms-targetMs);
+      if (diff<bestDiff && (!filterFn || filterFn(tl[i]))) { bestDiff=diff; best=tl[i]; }
+    }
+    return bestDiff<=10000 ? best : null;
+  }
+  for (let i=0; i<entries.length; i++) {
+    const e=entries[i];
+    if (e.event!=='pre'||!e.ts) continue;
+    const ms = new Date(e.ts).getTime();
+    let m = closest(ms, t=>t.tools?.includes(e.tool));
+    if (!m) m = closest(ms, null);
+    if (m) idx.set(i, m);
+  }
+  return idx;
+}
+
+// ─── FlowNode Component ─────────────────────────────────────────────────
+const FlowNode = {
+  name: 'FlowNode',
+  props: { node: Object, tokenIndex: Object, depth: { type: Number, default: 0 }, expandedSet: Object },
+  emits: ['toggle'],
+  setup(props, { emit }) {
+    const respOpen = ref(false);
+    const hasKids = computed(() => props.node.children?.length > 0);
+    const isExpanded = computed(() => props.expandedSet?.has(props.node.id));
+    const isAgent = computed(() => props.node.tool === 'Agent');
+    const isSkill = computed(() => props.node.tool === 'Skill');
+    const isContainer = computed(() => isAgent.value || isSkill.value);
+
+    const tok = computed(() => {
+      const t = props.node.tokens;
+      if (t && (t.input||t.output||t.cache_read||t.cache_create||t.cache_write||t.duration_ms)) return t;
+      return props.tokenIndex?.get(props.node.id) || null;
+    });
+    const totalIn = computed(() => tok.value ? (tok.value.input||0)+(tok.value.cache_read||0)+(tok.value.cache_write||0)+(tok.value.cache_create||0) : 0);
+    const totalOut = computed(() => tok.value?.output||0);
+    const hasTok = computed(() => tok.value && (totalIn.value || totalOut.value));
+
+    const label = computed(() => getLabel(props.node));
+    const desc = computed(() => getDescription(props.node));
+    const resp = computed(() => formatResponse(props.node.response));
+    const tagClass = computed(() => leafTagClass(props.node.tool));
+    // Extract agent/skill answer excerpt for inline display
+    const answerExcerpt = computed(() => {
+      const r = props.node.response;
+      if (!r || typeof r !== 'object' || !r.content) return '';
+      return extractContentText(r.content).slice(0, 300);
+    });
+
+    function toggle() { if (hasKids.value) emit('toggle', props.node.id); }
+    function goParent() {
+      if (props.node.parentId) {
+        const el = document.getElementById('node-'+props.node.parentId);
+        if (el) { el.scrollIntoView({behavior:'smooth',block:'nearest'});
+          el.style.outline='2px solid var(--agent)'; setTimeout(()=>el.style.outline='',1200); }
+      }
+    }
+
+    // Group children
+    const childGroups = computed(() => {
+      const kids = props.node.children || [];
+      if (!kids.length) return [];
+      const step1 = []; let pb = [];
+      for (const ch of kids) {
+        if (ch.parallel) pb.push(ch);
+        else { if (pb.length) { step1.push({type:'parallel',nodes:pb}); pb=[]; } step1.push({type:'single',node:ch}); }
+      }
+      if (pb.length) step1.push({type:'parallel',nodes:pb});
+      const groups = []; let cb = [];
+      function flush() {
+        if (!cb.length) return;
+        if (cb.length===1) groups.push({type:'single',nodes:[cb[0]]});
+        else groups.push({type:'cmdgroup',nodes:[...cb]});
+        cb = [];
+      }
+      for (const item of step1) {
+        if (item.type==='single' && item.node.tool!=='Agent' && item.node.tool!=='Skill') cb.push(item.node);
+        else { flush(); groups.push(item.node ? {type:item.type, nodes:[item.node]} : item); }
+      }
+      flush();
+      return groups;
+    });
+
+    const collapsedGroups = ref(new Set());
+    function toggleGroup(gid) {
+      const s = new Set(collapsedGroups.value);
+      if (s.has(gid)) s.delete(gid); else s.add(gid);
+      collapsedGroups.value = s;
+    }
+
+    function cmdSummary(nodes) {
+      const counts = {}; let ti = 0;
+      for (const n of nodes) {
+        counts[n.tool] = (counts[n.tool]||0)+1;
+        const t = n.tokens; if (t) ti += (t.input||0)+(t.cache_read||0)+(t.cache_create||0)+(t.cache_write||0);
+      }
+      return { tools: Object.entries(counts).map(([t,c])=>({tool:t,count:c,tag:leafTagClass(t)})), totalIn: ti };
+    }
+
+    return { respOpen, hasKids, isExpanded, isAgent, isSkill, isContainer,
+             tok, totalIn, totalOut, hasTok, label, desc, resp, tagClass, answerExcerpt,
+             toggle, goParent, fmtK, fmtT,
+             childGroups, collapsedGroups, toggleGroup, cmdSummary };
+  },
+  template: `
+    <div :id="'node-'+node.id">
+
+      <!-- ═══ AGENT NODE — prominent container ═══ -->
+      <div v-if="isAgent" class="n-agent">
+        <div class="n-agent__hdr" @click="toggle">
+          <div class="n-agent__icon">A</div>
+          <span class="n-agent__title">{{ label }}</span>
+          <span class="n-agent__desc" v-if="desc">{{ desc }}</span>
+          <div class="n-agent__meta">
+            <span v-if="hasTok" class="n-agent__tokens">
+              <span class="t-in">&uarr;{{ fmtK(totalIn) }}</span>
+              <span class="t-out">&darr;{{ fmtK(totalOut) }}</span>
+            </span>
+            <span v-if="node.status==='active'" class="n-agent__status n-agent__status--active">RUNNING</span>
+            <span class="n-agent__toggle" v-if="hasKids">{{ isExpanded ? '\u25BC' : '\u25B6' }} {{ node.children.length }}</span>
+          </div>
+        </div>
+        <div v-if="answerExcerpt" class="n-agent__answer" @click.stop="respOpen=!respOpen">
+          <div class="n-agent__answer-hdr">
+            <span class="n-agent__answer-icon">&#x1F4AC;</span>
+            <span class="n-agent__answer-label">Answer</span>
+            <span style="font-size:9px;color:var(--text-3);margin-left:auto">{{ respOpen ? '\u25BC full' : '\u25B6 full' }}</span>
+          </div>
+          <div class="n-agent__answer-text">{{ respOpen ? resp : answerExcerpt + (answerExcerpt.length >= 300 ? '...' : '') }}</div>
+        </div>
+        <div v-else-if="resp" style="padding:4px 12px 6px;border-top:1px solid var(--agent-bdr);font-size:10px">
+          <button style="background:none;border:none;font-size:10px;color:var(--text-3);cursor:pointer;font-family:inherit"
+                  @click.stop="respOpen=!respOpen">{{ respOpen ? '\u25BC' : '\u25B6' }} response</button>
+          <pre v-if="respOpen" class="n-leaf__resp" style="margin-left:0;margin-top:4px">{{ resp }}</pre>
+        </div>
+        <div class="n-agent__children" v-if="isExpanded && hasKids">
+          <template v-for="(g,gi) in childGroups" :key="gi">
+            <div v-if="g.type==='parallel'" class="n-parallel">
+              <div class="n-parallel__hdr">{{ g.nodes.length }} parallel agents</div>
+              <div class="n-parallel__cols">
+                <div class="n-parallel__col" v-for="c in g.nodes" :key="c.id">
+                  <flow-node :node="c" :token-index="tokenIndex" :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+                </div>
+              </div>
+            </div>
+            <div v-else-if="g.type==='cmdgroup'" class="n-cmdgroup">
+              <div class="n-cmdgroup__hdr" @click="toggleGroup(g.nodes[0].id)">
+                <span class="n-cmdgroup__count">{{ g.nodes.length }} operations</span>
+                <div class="n-cmdgroup__tools">
+                  <span v-for="t in cmdSummary(g.nodes).tools" :key="t.tool" :class="['n-cmdgroup__pill', t.tag]">
+                    {{ t.tool }}{{ t.count > 1 ? ' \u00D7'+t.count : '' }}
+                  </span>
+                </div>
+                <span class="n-cmdgroup__tokens" v-if="cmdSummary(g.nodes).totalIn">
+                  <span class="t-in">&uarr;{{ fmtK(cmdSummary(g.nodes).totalIn) }}</span>
+                </span>
+                <span class="n-cmdgroup__chev">{{ collapsedGroups.has(g.nodes[0].id) ? '\u25B6' : '\u25BC' }}</span>
+              </div>
+              <div class="n-cmdgroup__body" v-if="!collapsedGroups.has(g.nodes[0].id)">
+                <flow-node v-for="c in g.nodes" :key="c.id" :node="c" :token-index="tokenIndex"
+                           :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+              </div>
+            </div>
+            <flow-node v-else v-for="c in g.nodes" :key="c.id" :node="c" :token-index="tokenIndex"
+                       :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ SKILL NODE — similar to agent but purple ═══ -->
+      <div v-else-if="isSkill" class="n-skill">
+        <div class="n-skill__hdr" @click="toggle">
+          <div class="n-skill__icon">S</div>
+          <span style="font-weight:600;font-size:12px;color:var(--skill)">{{ label }}</span>
+          <span v-if="desc" style="font-size:11px;color:var(--text-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ desc }}</span>
+          <span v-if="hasTok" class="n-agent__tokens">
+            <span class="t-in">&uarr;{{ fmtK(totalIn) }}</span> <span class="t-out">&darr;{{ fmtK(totalOut) }}</span>
+          </span>
+          <span v-if="node.status==='active'" class="n-agent__status n-agent__status--active">RUNNING</span>
+          <span v-if="node.status==='pending'" style="font-size:9px;color:var(--text-3)">pending</span>
+          <span class="n-agent__toggle" v-if="hasKids">{{ isExpanded ? '\u25BC' : '\u25B6' }} {{ node.children.length }}</span>
+        </div>
+        <div v-if="answerExcerpt" class="n-agent__answer" style="border-color:#ddd6fe" @click.stop="respOpen=!respOpen">
+          <div class="n-agent__answer-hdr">
+            <span class="n-agent__answer-icon">&#x1F4AC;</span>
+            <span class="n-agent__answer-label">Answer</span>
+            <span style="font-size:9px;color:var(--text-3);margin-left:auto">{{ respOpen ? '\u25BC full' : '\u25B6 full' }}</span>
+          </div>
+          <div class="n-agent__answer-text">{{ respOpen ? resp : answerExcerpt + (answerExcerpt.length >= 300 ? '...' : '') }}</div>
+        </div>
+        <div v-else-if="resp" style="padding:4px 10px 6px;border-top:1px solid #ddd6fe;font-size:10px">
+          <button style="background:none;border:none;font-size:10px;color:var(--text-3);cursor:pointer;font-family:inherit"
+                  @click.stop="respOpen=!respOpen">{{ respOpen ? '\u25BC' : '\u25B6' }} response</button>
+          <pre v-if="respOpen" class="n-leaf__resp" style="margin-left:0;margin-top:4px">{{ resp }}</pre>
+        </div>
+        <div v-if="isExpanded && hasKids" class="n-skill__children">
+          <template v-for="(g,gi) in childGroups" :key="gi">
+            <flow-node v-if="g.type==='single'||g.type==='parallel'" v-for="c in g.nodes" :key="c.id"
+                       :node="c" :token-index="tokenIndex" :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+            <div v-else-if="g.type==='cmdgroup'" class="n-cmdgroup">
+              <div class="n-cmdgroup__hdr" @click="toggleGroup(g.nodes[0].id)">
+                <span class="n-cmdgroup__count">{{ g.nodes.length }} operations</span>
+                <div class="n-cmdgroup__tools">
+                  <span v-for="t in cmdSummary(g.nodes).tools" :key="t.tool" :class="['n-cmdgroup__pill', t.tag]">{{ t.tool }}{{ t.count>1?' \u00D7'+t.count:'' }}</span>
+                </div>
+                <span class="n-cmdgroup__chev">{{ collapsedGroups.has(g.nodes[0].id) ? '\u25B6' : '\u25BC' }}</span>
+              </div>
+              <div class="n-cmdgroup__body" v-if="!collapsedGroups.has(g.nodes[0].id)">
+                <flow-node v-for="c in g.nodes" :key="c.id" :node="c" :token-index="tokenIndex"
+                           :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ LEAF NODE — compact single row ═══ -->
+      <div v-else>
+        <div :class="['n-leaf', hasKids ? 'n-leaf--expandable' : '']" @click="toggle">
+          <span v-if="hasKids" class="n-leaf__toggle">{{ isExpanded ? '\u25BC' : '\u25B6' }}</span>
+          <span :class="['n-leaf__tag', tagClass]">{{ node.tool }}</span>
+          <span class="n-leaf__label" :title="label">{{ label || '\u2014' }}</span>
+          <span v-if="hasKids" class="n-leaf__toggle" style="font-size:9px;color:var(--text-3)">{{ node.children.length }}</span>
+          <span v-if="hasTok" class="n-leaf__tokens">
+            <span class="t-in">&uarr;{{ fmtK(totalIn) }}</span>
+            <span class="t-out">&darr;{{ fmtK(totalOut) }}</span>
+            <span v-if="tok.duration_ms" class="t-dur">{{ tok.duration_ms }}ms</span>
+          </span>
+          <span v-if="node.status==='active'" class="n-leaf__status">RUNNING</span>
+          <button v-if="resp" class="n-leaf__resp-btn" @click.stop="respOpen=!respOpen">{{ respOpen ? '\u25BC' : '\u25B6' }}</button>
+        </div>
+        <pre v-if="respOpen && resp" class="n-leaf__resp">{{ resp }}</pre>
+        <!-- Leaf with children (Bash can have sub-calls) -->
+        <div v-if="isExpanded && hasKids" class="n-leaf__children">
+          <flow-node v-for="c in node.children" :key="c.id" :node="c" :token-index="tokenIndex"
+                     :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+        </div>
+      </div>
+    </div>
+  `
+};
+FlowNode.components = { 'flow-node': FlowNode };
+
+// ─── Process / BPMN Node Component ──────────────────────────────────────
+const ProcessNode = {
+  name: 'ProcessNode',
+  props: { node: Object },
+  setup(props) {
+    const isAgent = computed(() => props.node.tool === 'Agent');
+    const isSkill = computed(() => props.node.tool === 'Skill');
+    const isContainer = computed(() => (isAgent.value || isSkill.value) && (props.node.children?.length > 0));
+    const isUser = computed(() => props.node.tool === 'User' || props.node.tool === 'Command');
+    const label = computed(() => getLabel(props.node));
+    const desc = computed(() => getDescription(props.node));
+
+    function taskClass(tool) {
+      if (!tool) return 'bp-task--default';
+      if (tool === 'Agent') return 'bp-task--agent';
+      if (tool === 'Skill') return 'bp-task--skill';
+      if (tool === 'User' || tool === 'Command') return 'bp-task--user';
+      if (tool === 'Bash') return 'bp-task--bash';
+      if (tool === 'Read' || tool === 'Glob' || tool === 'Grep') return 'bp-task--read';
+      if (tool === 'Edit' || tool === 'Write') return 'bp-task--edit';
+      if (tool === 'SendMessage') return 'bp-task--send';
+      if (tool?.startsWith('mcp__')) return 'bp-task--mcp';
+      return 'bp-task--default';
+    }
+
+    function toolIcon(tool) {
+      if (tool === 'Agent') return 'A';
+      if (tool === 'Skill') return 'S';
+      if (tool === 'User' || tool === 'Command') return '\u270D';
+      if (tool === 'Bash') return '$';
+      if (tool === 'Read' || tool === 'Glob' || tool === 'Grep') return '\u2690';
+      if (tool === 'Edit' || tool === 'Write') return '\u270E';
+      if (tool === 'SendMessage') return '\u2709';
+      if (tool?.startsWith('mcp__')) return 'M';
+      return '\u2022';
+    }
+
+    // Group children into parallel batches vs sequential
+    const childGroups = computed(() => {
+      const kids = props.node.children || [];
+      if (!kids.length) return [];
+      const groups = []; let pb = [];
+      for (const ch of kids) {
+        if (ch.parallel) pb.push(ch);
+        else { if (pb.length) { groups.push({ parallel: true, nodes: pb }); pb = []; } groups.push({ parallel: false, nodes: [ch] }); }
+      }
+      if (pb.length) groups.push({ parallel: true, nodes: pb });
+      return groups;
+    });
+
+    return { isAgent, isSkill, isContainer, isUser, label, desc, taskClass, toolIcon, childGroups };
+  },
+  template: `
+    <div class="bp-flow">
+      <div class="bp-conn"></div>
+
+      <!-- ═══ CONTAINER (Agent/Skill with children) — render as sub-process ═══ -->
+      <div v-if="isContainer" :class="['bp-subprocess', isSkill ? 'bp-subprocess--skill' : '']">
+        <div class="bp-subprocess__hdr">
+          <div :class="['bp-subprocess__icon', isAgent ? 'bp-subprocess__icon--agent' : 'bp-subprocess__icon--skill']">
+            {{ isAgent ? 'A' : 'S' }}
+          </div>
+          <span class="bp-subprocess__name">{{ label }}</span>
+          <span v-if="desc" class="bp-subprocess__desc">{{ desc }}</span>
+          <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF; RUNNING</span>
+        </div>
+        <div class="bp-subprocess__body">
+          <template v-for="(g, gi) in childGroups" :key="gi">
+            <template v-if="g.parallel">
+              <div class="bp-conn"></div>
+              <div class="bp-gateway"><span class="bp-gateway__inner">+</span></div>
+              <div class="bp-conn"></div>
+              <div class="bp-parallel">
+                <div v-for="c in g.nodes" :key="c.id" class="bp-branch">
+                  <process-node :node="c" />
+                </div>
+              </div>
+              <div class="bp-conn"></div>
+              <div class="bp-gateway"><span class="bp-gateway__inner">+</span></div>
+            </template>
+            <template v-else>
+              <process-node v-for="c in g.nodes" :key="c.id" :node="c" />
+            </template>
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ LEAF TASK (no children or non-container) ═══ -->
+      <div v-else :class="['bp-task', taskClass(node.tool)]" :title="label">
+        <div class="bp-task__icon">{{ toolIcon(node.tool) }}</div>
+        <div class="bp-task__body">
+          <div v-if="node.tool !== 'User' && node.tool !== 'Command'" class="bp-task__type">{{ node.tool }}</div>
+          <div class="bp-task__label">{{ label || node.cmd || '\u2014' }}</div>
+        </div>
+        <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF;</span>
+      </div>
+    </div>
+  `
+};
+ProcessNode.components = { 'process-node': ProcessNode };
+
+// ─── Main App ────────────────────────────────────────────────────────────
+const app = createApp({
+  components: { 'flow-node': FlowNode, 'process-node': ProcessNode },
+  setup() {
+    const sessions = ref([]);
+    const activeSession = ref(null);
+    const entries = ref([]);
+    const stats = ref(null);
+    const liveConnected = ref(false);
+    const tab = ref('tree');
+    const autoScroll = ref(true);
+    const sessionSearch = ref('');
+    const eventSearch = ref('');
+    const eventToolFilter = ref('');
+    const eventDirFilter = reactive({ pre: true, post: true, command: true, prompt: true });
+    const openResps = reactive({});
+    const collapsedProjects = reactive({});
+    const selectMode = ref(false);
+    const selectedSessions = ref(new Set());
+    const expandedSet = ref(new Set());
+    const treeWrap = ref(null);
+    const eventsTable = ref(null);
+    const searchInput = ref(null);
+
+    const treeData = shallowRef(null);
+    const treeVersion = ref(0);
+    const tree = computed(() => { treeVersion.value; return treeData.value?.root || null; });
+    const tokenIndex = computed(() => { treeVersion.value; return buildTokenIndex(entries.value, stats.value?.timeline || []); });
+    const topTools = computed(() => Object.entries(stats.value?.tools||{}).sort((a,b)=>b[1]-a[1]).slice(0,6));
+
+    const estimatedCost = computed(() => {
+      const t = stats.value?.tokens; if (!t) return null;
+      const cost = (t.input||0)*3/1e6 + (t.output||0)*15/1e6 + (t.cache_read||0)*0.30/1e6 + (t.cache_create||0)*3.75/1e6;
+      return cost < 0.005 ? null : (cost < 1 ? cost.toFixed(2) : cost.toFixed(1));
+    });
+
+    const sessionDuration = computed(() => {
+      if (!entries.value.length) return '';
+      const first = entries.value[0]?.ts, last = entries.value[entries.value.length-1]?.ts;
+      if (!first || !last) return '';
+      const ms = new Date(last) - new Date(first);
+      if (ms < 0) return '';
+      const min = Math.floor(ms/60000), sec = Math.floor((ms%60000)/1000);
+      return min>60 ? `${Math.floor(min/60)}h${min%60}m` : min>0 ? `${min}m${sec}s` : `${sec}s`;
+    });
+
+    const filteredProjectGroups = computed(() => {
+      const q = sessionSearch.value.toLowerCase().trim();
+      let list = sessions.value;
+      if (q) list = list.filter(s => (s.project||'').toLowerCase().includes(q) || (s.session_id||'').toLowerCase().includes(q) || (s.first_ts||'').includes(q));
+      const map = {};
+      for (const s of list) { const p=s.project||''; if (!map[p]) map[p]=[]; map[p].push(s); }
+      const ap = list.find(s=>s.session_id===activeSession.value)?.project||'';
+      return Object.entries(map).sort(([a],[b])=>{ if (a===ap) return -1; if (b===ap) return 1; return a.localeCompare(b); })
+                   .map(([project,sessions])=>({project,sessions}));
+    });
+
+    function groupByDate(sl) {
+      const groups = {};
+      for (const s of sl) { const d=s.first_ts?s.first_ts.slice(0,10):'unknown'; if (!groups[d]) groups[d]=[]; groups[d].push(s); }
+      const today = new Date().toISOString().slice(0,10), yday = new Date(Date.now()-864e5).toISOString().slice(0,10);
+      return Object.entries(groups).map(([date,sessions])=>{
+        let label = date;
+        if (date===today) label='Today'; else if (date===yday) label='Yesterday';
+        else { const d=new Date(date); if (!isNaN(d)) label=d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+        return {label,sessions};
+      });
+    }
+    function timeOf(ts) { return ts ? ts.slice(11,16) : '--:--'; }
+
+    const availableTools = computed(() => { const s=new Set(); for (const e of entries.value) if (e.tool) s.add(e.tool); return [...s].sort(); });
+    const filteredEvents = computed(() => {
+      const q = eventSearch.value.toLowerCase().trim();
+      return entries.value.map((e,i)=>({...e,_idx:i})).filter(e => {
+        if (!eventDirFilter[e.event]) return false;
+        if (eventToolFilter.value && e.tool!==eventToolFilter.value) return false;
+        if (q) { const s=summarise(e).toLowerCase(), t=(e.tool||'').toLowerCase(); if (!s.includes(q)&&!t.includes(q)) return false; }
+        return true;
+      });
+    });
+
+    function summarise(e) {
+      if (e.cmd) return e.cmd;
+      const i=e.input||{};
+      switch (e.tool) {
+        case 'Agent': return `[${i.agent||'?'}] ${i.description||''}`;
+        case 'Skill': return `${i.skill||''}${i.args?' '+i.args:''}`;
+        case 'SendMessage': return `\u2192 ${i.to||''}: ${(i.message||'').slice(0,80)}`;
+        case 'TaskCreate': return i.title || JSON.stringify(i).slice(0,80);
+        case 'TaskUpdate': return `${i.id||''} \u2192 ${i.status||''}`;
+        case 'Bash': return i.description || (i.command||'').slice(0,80);
+        case 'Read': case 'Glob': case 'Grep': return (i.path||i.file_path||i.pattern||'').split('/').slice(-3).join('/');
+        case 'Edit': case 'Write': return (i.file_path||'').split('/').slice(-3).join('/');
+        case 'Command': return `${i.command||''} ${i.args||''}`.trim();
+        case 'User': return (i.message||'').slice(0,120);
+        default: return JSON.stringify(i).slice(0,100);
+      }
+    }
+    function fmtResp(r) {
+      if (r==null||r==='') return '';
+      if (typeof r==='object') {
+        if (r.stdout!=null||r.stderr!=null) { const p=[]; if (r.exit_code!=null&&r.exit_code!==0) p.push('exit: '+r.exit_code); if (r.stdout) p.push(String(r.stdout)); if (r.stderr) p.push('stderr: '+String(r.stderr)); if (r.interrupted) p.push('[interrupted]'); return p.join('\n')||'(empty)'; }
+        if (r.files) return `${r.count||0} files: ${Array.isArray(r.files)?r.files.join(', '):r.files}`;
+        if (r.matches) return `${r.num_files||0} files matched\n${r.matches}`;
+        if (r.content) return extractContentText(r.content);
+        return JSON.stringify(r,null,2);
+      }
+      return String(r);
+    }
+    function toolClass(tool) { if (!tool) return 'default'; if (tool.startsWith('mcp__')) return 'mcp'; return tool.toLowerCase(); }
+    function toggleEventResp(i) { if (openResps[i]) delete openResps[i]; else openResps[i]=true; }
+    function toggleProject(n) { if (collapsedProjects[n]) delete collapsedProjects[n]; else collapsedProjects[n]=true; }
+
+    // ── Session delete / select ──
+    function toggleSelectMode() {
+      selectMode.value = !selectMode.value;
+      if (!selectMode.value) selectedSessions.value = new Set();
+    }
+    function toggleSessionSelect(id) {
+      const s = new Set(selectedSessions.value);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      selectedSessions.value = s;
+    }
+    function selectAllVisible() {
+      const s = new Set();
+      for (const grp of filteredProjectGroups.value) {
+        for (const sess of grp.sessions) s.add(sess.session_id);
+      }
+      selectedSessions.value = s;
+    }
+    async function deleteSessions(ids) {
+      try {
+        for (const id of ids) {
+          await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+        }
+        if (ids.includes(activeSession.value)) {
+          activeSession.value = null; entries.value = []; stats.value = null;
+          treeData.value = null; treeVersion.value++;
+          if (entryES) { entryES.close(); entryES = null; }
+        }
+        await loadSessions();
+      } catch(e) {}
+    }
+    async function deleteSingleSession(id) {
+      if (!confirm('Delete this session?')) return;
+      await deleteSessions([id]);
+    }
+    async function deleteSelectedSessions() {
+      const ids = [...selectedSessions.value];
+      if (!ids.length) return;
+      if (!confirm(`Delete ${ids.length} session${ids.length > 1 ? 's' : ''}?`)) return;
+      await deleteSessions(ids);
+      selectedSessions.value = new Set();
+      selectMode.value = false;
+    }
+    function onToggleNode(id) { const s=new Set(expandedSet.value); if (s.has(id)) s.delete(id); else s.add(id); expandedSet.value=s; }
+    function expandAll() {
+      if (!treeData.value) return; const s=new Set();
+      (function walk(n){ if (n.children?.length){ s.add(n.id); n.children.forEach(walk); } })(treeData.value.root);
+      expandedSet.value=s;
+    }
+    function collapseAll() { expandedSet.value=new Set(); }
+
+    let entryES=null, globalES=null;
+    async function loadSessions() { try { sessions.value = await fetch('/api/sessions').then(r=>r.json()); } catch(e){} }
+
+    function autoExpandContainers() {
+      if (!treeData.value) return;
+      const s = new Set();
+      (function walk(n) {
+        if (n.children?.length && (n.tool==='Claude'||n.tool==='Agent'||n.tool==='Skill')) s.add(n.id);
+        n.children?.forEach(walk);
+      })(treeData.value.root);
+      expandedSet.value = s;
+    }
+
+    async function selectSession(id) {
+      if (id===activeSession.value) return;
+      if (entryES) { entryES.close(); entryES=null; }
+      activeSession.value=id; entries.value=[]; stats.value=null; treeData.value=null; treeVersion.value++;
+      expandedSet.value=new Set(); Object.keys(openResps).forEach(k=>delete openResps[k]);
+      try {
+        const [er, sr] = await Promise.all([
+          fetch(`/api/sessions/${id}`).then(r=>r.json()),
+          fetch(`/api/sessions/${id}/stats`).then(r=>r.json()).catch(()=>null),
+        ]);
+        if (id!==activeSession.value) return;
+        entries.value = er.entries||[]; stats.value = sr;
+        if (entries.value.length) { treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers(); }
+      } catch(e){}
+      connectEntryStream(id);
+    }
+
+    function connectEntryStream(id) {
+      entryES = new EventSource(`/api/sessions/${id}/stream`);
+      entryES.addEventListener('connected', ()=>{ liveConnected.value=true; });
+      entryES.addEventListener('entry', ev => {
+        try {
+          const entry = JSON.parse(ev.data);
+          entries.value = [...entries.value, entry];
+          if (treeData.value) {
+            if (entry.parent_id) {
+              // Has explicit parent info — patch incrementally
+              if (patchTree(treeData.value.root, treeData.value.nodeMap, entry)) {
+                treeVersion.value++;
+                if (entry.event==='pre' && (entry.tool==='Agent'||entry.tool==='Skill') && entry.action_id) {
+                  const s = new Set(expandedSet.value); s.add(entry.action_id); expandedSet.value = s;
+                }
+              }
+            } else {
+              // No parent info — rebuild with heuristic to get correct nesting
+              treeData.value = buildTree(entries.value); treeVersion.value++;
+              autoExpandContainers();
+            }
+          }
+          else { treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers(); }
+          if (autoScroll.value) {
+            nextTick(()=>{
+              if (tab.value==='tree' && treeWrap.value) treeWrap.value.scrollTop=treeWrap.value.scrollHeight;
+              if (tab.value==='events' && eventsTable.value) eventsTable.value.scrollTop=eventsTable.value.scrollHeight;
+            });
+          }
+        } catch(e){}
+      });
+      entryES.addEventListener('ping', ()=>{});
+      entryES.onerror = ()=>{ liveConnected.value=false; if (entryES){entryES.close();entryES=null;} setTimeout(()=>{ if (activeSession.value===id) connectEntryStream(id); },3000); };
+    }
+
+    function connectGlobalStream() {
+      if (globalES) { globalES.close(); globalES=null; }
+      globalES = new EventSource('/api/stream/global');
+      // Refresh session list on every (re)connect — catches sessions created while disconnected
+      globalES.addEventListener('connected', ()=>loadSessions());
+      globalES.onopen = ()=>loadSessions();
+      globalES.addEventListener('session_new', ()=>loadSessions());
+      globalES.addEventListener('ping', ()=>{});
+      globalES.onerror = ()=>{
+        liveConnected.value=false;
+        // EventSource auto-reconnects on network errors, but if the server
+        // is down for a while, manually retry after 5 seconds
+        if (globalES && globalES.readyState === EventSource.CLOSED) {
+          globalES.close(); globalES=null;
+          setTimeout(connectGlobalStream, 5000);
+        }
+      };
+    }
+
+    function onKey(e) {
+      if (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') { if (e.key==='Escape') e.target.blur(); return; }
+      switch(e.key) {
+        case '/': e.preventDefault(); searchInput.value?.focus(); break;
+        case 'e': tab.value='events'; break;
+        case 't': tab.value='tree'; break;
+        case 'p': tab.value='process'; break;
+        case 'j': case 'ArrowDown': { e.preventDefault(); const items=[...document.querySelectorAll('.sess')]; const cur=items.findIndex(el=>el.classList.contains('sess--active')); if (items[cur+1]) items[cur+1].click(); break; }
+        case 'k': case 'ArrowUp': { e.preventDefault(); const items=[...document.querySelectorAll('.sess')]; const cur=items.findIndex(el=>el.classList.contains('sess--active')); if (items[cur-1]) items[cur-1].click(); break; }
+        case 'Escape': collapseAll(); break;
+      }
+    }
+
+    // Periodic session list refresh — fallback for missed SSE events
+    let pollTimer = null;
+
+    onMounted(async ()=>{
+      await loadSessions(); connectGlobalStream();
+      if (sessions.value.length) selectSession(sessions.value[0].session_id);
+      document.addEventListener('keydown', onKey);
+      // Poll every 30s as a safety net for detecting new sessions
+      pollTimer = setInterval(loadSessions, 30000);
+    });
+    onUnmounted(()=>{
+      globalES?.close(); entryES?.close();
+      if (pollTimer) clearInterval(pollTimer);
+      document.removeEventListener('keydown', onKey);
+    });
+
+    return { sessions, activeSession, entries, stats, liveConnected, tab, autoScroll,
+             sessionSearch, eventSearch, eventToolFilter, eventDirFilter, openResps,
+             collapsedProjects, expandedSet, treeWrap, eventsTable, searchInput,
+             tree, tokenIndex, topTools, estimatedCost, sessionDuration,
+             filteredProjectGroups, filteredEvents, availableTools,
+             groupByDate, timeOf, fmtK, fmtT, summarise, fmtResp, toolClass,
+             selectSession, toggleProject, toggleEventResp,
+             onToggleNode, expandAll, collapseAll,
+             selectMode, selectedSessions, toggleSelectMode,
+             toggleSessionSelect, selectAllVisible, deleteSingleSession, deleteSelectedSessions };
+  }
+});
+app.mount('#app');
+</script>
+</body>
+</html>

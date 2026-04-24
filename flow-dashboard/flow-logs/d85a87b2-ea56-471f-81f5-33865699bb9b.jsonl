@@ -1,0 +1,2 @@
+{"ts": "2026-04-04T20:53:59.900Z", "event": "pre", "tool": "Agent", "input": {"agent": "Explore", "description": "Explore codebase structure", "name": ""}}
+{"ts": "2026-04-04T20:56:36.000Z", "event": "post", "tool": "Agent", "input": {"agent": "Explore", "description": "Explore codebase structure", "name": ""}, "response": "Found 12 files matching the pattern"}

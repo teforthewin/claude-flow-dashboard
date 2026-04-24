@@ -1,0 +1,1299 @@
+import { createApp, ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, shallowRef } from 'vue';
+
+// ─── Utilities ───────────────────────────────────────────────────────────
+function fmtK(n) {
+  if (!n) return '0';
+  if (n >= 1_000_000) return (Math.round(n / 100_000) / 10) + 'M';
+  if (n >= 1000) return (Math.round(n / 100) / 10) + 'k';
+  return String(n);
+}
+function fmtT(ts) { return ts ? ts.slice(11, 19) : ''; }
+function fmtCost(n) { return '$' + (n >= 0.01 ? n.toFixed(2) : n.toFixed(4)); }
+function fmtCostSmall(n) { return '$' + (n >= 0.001 ? n.toFixed(3) : n.toFixed(4)); }
+
+const CONTAINER_TOOLS = new Set(['Agent', 'Skill', 'Bash']);
+
+function getLabel(node) {
+  if (node.cmd) return node.cmd;
+  const i = node.input || {};
+  switch (node.tool) {
+    case 'Agent':       return `${i.agent || i.subagent_type || 'general-purpose'}${i.name ? ' ['+i.name+']' : ''}`;
+    case 'Skill':       return `${i.skill||''}${i.args?' '+i.args:''}`;
+    case 'SendMessage': return `→ ${i.to||''}: ${(i.message||'').slice(0,80)}`;
+    case 'TaskCreate':  return i.title || '';
+    case 'TaskUpdate':  return `${i.id||''} → ${i.status||''}`;
+    case 'Read': case 'Glob': case 'Grep':
+      return (i.file_path||i.path||i.pattern||'').split('/').slice(-2).join('/');
+    case 'Bash': return i.description || (i.command||'').slice(0,80) || '';
+    case 'Edit': case 'Write': return (i.file_path||'').split('/').slice(-2).join('/');
+    case 'Command': return `${i.command||''} ${i.args||''}`.trim();
+    case 'User': return (i.message||'').slice(0,120);
+    case 'AgentSetting': return String(i.skill||'');
+    case 'SkillListing': return `${i.skillCount ?? 0} skills loaded`;
+    default:
+      if (node.tool?.startsWith('mcp__')) return node.tool.replace(/^mcp__[^_]+__/, '');
+      return '';
+  }
+}
+
+function getDescription(node) {
+  const i = node.input || {};
+  if (node.tool === 'Agent' && i.description) return i.description;
+  if (node.tool === 'Skill' && i.args) return i.args;
+  if (node.tool === 'SendMessage' && i.message) return String(i.message).slice(0, 200);
+  if (node.tool === 'Bash' && i.command) return String(i.command).slice(0, 200);
+  if (node.tool === 'Command' && i.args) return i.args;
+  return '';
+}
+
+function extractContentText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(b => b && (b.type === 'text' || typeof b === 'string'))
+      .map(b => typeof b === 'string' ? b : (b.text || ''))
+      .join('\n');
+  }
+  return String(content);
+}
+
+function formatResponse(r) {
+  if (!r || r === '') return '';
+  if (typeof r === 'object') {
+    if (r.stdout != null || r.stderr != null) {
+      const parts = [];
+      if (r.exit_code != null && r.exit_code !== 0) parts.push('exit: ' + r.exit_code);
+      if (r.stdout) parts.push(String(r.stdout).slice(0, 500));
+      if (r.stderr) parts.push('stderr: ' + String(r.stderr).slice(0, 200));
+      return parts.join('\n');
+    }
+    if (r.files) return `${r.count||0} files: ${Array.isArray(r.files)?r.files.join(', '):r.files}`;
+    if (r.matches) return `${r.num_files||0} files matched\n${r.matches}`;
+    if (r.content) return extractContentText(r.content).slice(0, 2000);
+    return JSON.stringify(r, null, 2).slice(0, 600);
+  }
+  return String(r).slice(0, 600);
+}
+
+function leafTagClass(tool) {
+  if (!tool) return 'ltag-default';
+  if (tool.startsWith('mcp__')) return 'ltag-mcp';
+  const m = { Bash:'ltag-bash', Read:'ltag-read', Glob:'ltag-glob', Grep:'ltag-grep',
+              Edit:'ltag-edit', Write:'ltag-write', Skill:'ltag-skill',
+              SendMessage:'ltag-sendmessage', TaskCreate:'ltag-taskcreate',
+              TaskUpdate:'ltag-taskupdate', Command:'ltag-command', User:'ltag-user',
+              AgentSetting:'ltag-agentsetting', SkillListing:'ltag-skilllisting' };
+  return m[tool] || 'ltag-default';
+}
+
+// ─── Tree Builder ────────────────────────────────────────────────────────
+function buildTree(entries) {
+  const root = { id:'root', tool:'Claude', children:[], status:'root',
+                 input:{}, ts:entries[0]?.ts||'', response:null, postTs:null, cmd:'', tokens:null };
+  const nodeMap = new Map();
+  const hasParentIds = entries.some(e => e.parent_id);
+  if (hasParentIds) _buildById(entries, root, nodeMap);
+  else _buildHeuristic(entries, root, nodeMap);
+  return { root, nodeMap };
+}
+
+function _buildById(entries, root, nodeMap) {
+  nodeMap.set('root', root); nodeMap.set(null, root); nodeMap.set(undefined, root);
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.event !== 'pre' && e.event !== 'command' && e.event !== 'prompt') continue;
+    const node = { id:e.action_id||`i${i}`, tool:e.tool, input:e.input||{}, ts:e.ts,
+                   cmd:e.cmd||'', tokens:e.tokens||null,
+                   status:CONTAINER_TOOLS.has(e.tool)?'active':'done',
+                   children:[], response:null, postTs:null, parallel:false, parentId:e.parent_id||null };
+    nodeMap.set(node.id, node);
+    const par = nodeMap.get(e.parent_id) || root;
+    node.parentId = par.id;
+    if (e.tool === 'Agent') {
+      const sib = par.children.find(c => c.tool === 'Agent' && c.status === 'active');
+      if (sib) { node.parallel = true;
+        par.children.filter(c => c.tool==='Agent'&&(c.status==='active'||c.parallel)).forEach(c => c.parallel=true); }
+    }
+    par.children.push(node);
+  }
+  for (const e of entries) {
+    if (e.event !== 'post') continue;
+    const node = nodeMap.get(e.action_id);
+    if (!node) continue;
+    node.status = 'done'; node.response = e.response ?? ''; node.postTs = e.ts;
+    if (e.tokens) node.tokens = e.tokens;
+  }
+}
+
+function _buildHeuristic(entries, root, nodeMap) {
+  nodeMap.set('root', root);
+  const stack = [root], openAgents = [];
+  const agentKey = inp => `${inp?.agent||inp?.subagent_type||''}::${inp?.name||''}`;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.event === 'post') {
+      if (e.action_id && nodeMap.has(e.action_id)) {
+        const node = nodeMap.get(e.action_id);
+        node.status='done'; node.response=e.response??''; node.postTs=e.ts;
+        if (e.tokens) node.tokens=e.tokens;
+        if (node.tool==='Agent') {
+          const mi = openAgents.indexOf(node); if (mi!==-1) openAgents.splice(mi,1);
+          const si = stack.indexOf(node); if (si!==-1) stack.splice(si,1);
+        }
+        continue;
+      }
+      if (e.tool === 'Agent') {
+        const key = agentKey(e.input);
+        let mi = -1;
+        for (let j = openAgents.length-1; j >= 0; j--) { if (agentKey(openAgents[j].input)===key) { mi=j; break; } }
+        if (mi===-1 && openAgents.length) mi = openAgents.length-1;
+        if (mi!==-1) {
+          const n = openAgents[mi]; n.status='done'; n.response=e.response??''; n.postTs=e.ts;
+          if (e.tokens) n.tokens=e.tokens; openAgents.splice(mi,1);
+          const si = stack.indexOf(n); if (si!==-1) stack.splice(si,1);
+        }
+      } else {
+        for (let j = stack.length-1; j >= 0; j--) {
+          let found = false;
+          for (let k = stack[j].children.length-1; k >= 0; k--) {
+            const c = stack[j].children[k];
+            if (c.tool===e.tool && c.status==='pending') {
+              c.status='done'; c.response=e.response??''; c.postTs=e.ts;
+              if (e.tokens) c.tokens=e.tokens; found=true; break;
+            }
+          }
+          if (found) break;
+        }
+      }
+      continue;
+    }
+    if (e.event === 'command' || e.event === 'prompt') {
+      const n = { id:e.action_id||`i${i}`, tool:e.tool||'Command', input:e.input||{}, ts:e.ts, cmd:e.cmd||'',
+                  tokens:e.tokens||null, status:'done', children:[], response:null, postTs:null,
+                  parallel:false, parentId:root.id };
+      nodeMap.set(n.id, n); root.children.push(n); continue;
+    }
+    if (e.tool === 'Agent') {
+      let pi = stack.length-1;
+      const eMs = new Date(e.ts).getTime();
+      while (pi > 0 && stack[pi].tool === 'Agent' && stack[pi].status === 'active') {
+        const gap = (eMs - new Date(stack[pi].ts).getTime()) / 1000;
+        if (gap < 30) pi--;
+        else break;
+      }
+      const par = stack[pi];
+      const n = { id:e.action_id||`i${i}`, tool:'Agent', input:e.input||{}, ts:e.ts, cmd:e.cmd||'',
+                  tokens:e.tokens||null, status:'active', children:[], response:null, postTs:null,
+                  parallel:false, parentId:par.id };
+      const sib = par.children.find(c=>c.tool==='Agent'&&c.status==='active');
+      if (sib) { n.parallel=true; par.children.filter(c=>c.tool==='Agent'&&(c.status==='active'||c.parallel)).forEach(c=>c.parallel=true); }
+      nodeMap.set(n.id, n); par.children.push(n); openAgents.push(n); stack.push(n);
+    } else {
+      const par = stack[stack.length-1];
+      const np = e.tool==='Skill'||e.tool==='SendMessage';
+      const n = { id:e.action_id||`i${i}`, tool:e.tool, input:e.input||{}, ts:e.ts, cmd:e.cmd||'',
+                  tokens:e.tokens||null, status:np?'pending':'done',
+                  children:[], response:null, postTs:null, parallel:false, parentId:par.id };
+      nodeMap.set(n.id, n); par.children.push(n);
+    }
+  }
+}
+
+// ─── Token Index (binary search) ─────────────────────────────────────────
+function buildTokenIndex(entries, timeline) {
+  const idx = new Map();
+  if (!timeline?.length) return idx;
+  const tl = timeline.filter(m=>m.ts).map(m=>({...m, _ms:new Date(m.ts).getTime()})).sort((a,b)=>a._ms-b._ms);
+  if (!tl.length) return idx;
+  function closest(targetMs, filterFn) {
+    let lo=0, hi=tl.length-1, best=null, bestDiff=Infinity;
+    while (lo<=hi) { const mid=(lo+hi)>>1; if (tl[mid]._ms<targetMs) lo=mid+1; else hi=mid-1; }
+    const start=Math.max(0,lo-10), end=Math.min(tl.length-1,lo+10);
+    for (let i=start; i<=end; i++) {
+      const diff=Math.abs(tl[i]._ms-targetMs);
+      if (diff<bestDiff && (!filterFn || filterFn(tl[i]))) { bestDiff=diff; best=tl[i]; }
+    }
+    return bestDiff<=10000 ? best : null;
+  }
+  for (let i=0; i<entries.length; i++) {
+    const e=entries[i];
+    if (e.event!=='pre'||!e.ts) continue;
+    const ms = new Date(e.ts).getTime();
+    let m = closest(ms, t=>t.tools?.includes(e.tool));
+    if (!m) m = closest(ms, null);
+    if (m) idx.set(i, m);
+  }
+  return idx;
+}
+
+// ─── FlowNode Component ─────────────────────────────────────────────────
+const FlowNode = {
+  name: 'FlowNode',
+  props: { node: Object, tokenIndex: Object, depth: { type: Number, default: 0 }, expandedSet: Object },
+  emits: ['toggle'],
+  setup(props, { emit }) {
+    const respOpen = ref(false);
+    const hasKids = computed(() => props.node.children?.length > 0);
+    const isExpanded = computed(() => props.expandedSet?.has(props.node.id));
+    const isAgent = computed(() => props.node.tool === 'Agent');
+    const isSkill = computed(() => props.node.tool === 'Skill');
+    const isContainer = computed(() => isAgent.value || isSkill.value);
+
+    const tok = computed(() => {
+      const t = props.node.tokens;
+      if (t && (t.input||t.output||t.cache_read||t.cache_create||t.cache_write||t.duration_ms)) return t;
+      return props.tokenIndex?.get(props.node.id) || null;
+    });
+    const totalIn = computed(() => tok.value ? (tok.value.input||0)+(tok.value.cache_read||0)+(tok.value.cache_write||0)+(tok.value.cache_create||0) : 0);
+    const totalOut = computed(() => tok.value?.output||0);
+    const hasTok = computed(() => tok.value && (totalIn.value || totalOut.value));
+
+    const label = computed(() => getLabel(props.node));
+    const desc = computed(() => getDescription(props.node));
+    const resp = computed(() => formatResponse(props.node.response));
+    const tagClass = computed(() => leafTagClass(props.node.tool));
+    const answerExcerpt = computed(() => {
+      const r = props.node.response;
+      if (!r || typeof r !== 'object' || !r.content) return '';
+      return extractContentText(r.content).slice(0, 300);
+    });
+
+    function toggle() { if (hasKids.value) emit('toggle', props.node.id); }
+    function goParent() {
+      if (props.node.parentId) {
+        const el = document.getElementById('node-'+props.node.parentId);
+        if (el) { el.scrollIntoView({behavior:'smooth',block:'nearest'});
+          el.style.outline='2px solid var(--agent)'; setTimeout(()=>el.style.outline='',1200); }
+      }
+    }
+
+    const childGroups = computed(() => {
+      const kids = props.node.children || [];
+      if (!kids.length) return [];
+      const step1 = []; let pb = [];
+      for (const ch of kids) {
+        if (ch.parallel) pb.push(ch);
+        else { if (pb.length) { step1.push({type:'parallel',nodes:pb}); pb=[]; } step1.push({type:'single',node:ch}); }
+      }
+      if (pb.length) step1.push({type:'parallel',nodes:pb});
+      const groups = []; let cb = [];
+      function flush() {
+        if (!cb.length) return;
+        if (cb.length===1) groups.push({type:'single',nodes:[cb[0]]});
+        else groups.push({type:'cmdgroup',nodes:[...cb]});
+        cb = [];
+      }
+      for (const item of step1) {
+        if (item.type==='single' && item.node.tool!=='Agent' && item.node.tool!=='Skill') cb.push(item.node);
+        else { flush(); groups.push(item.node ? {type:item.type, nodes:[item.node]} : item); }
+      }
+      flush();
+      return groups;
+    });
+
+    const collapsedGroups = ref(new Set());
+    function toggleGroup(gid) {
+      const s = new Set(collapsedGroups.value);
+      if (s.has(gid)) s.delete(gid); else s.add(gid);
+      collapsedGroups.value = s;
+    }
+
+    function cmdSummary(nodes) {
+      const counts = {}; let ti = 0;
+      for (const n of nodes) {
+        counts[n.tool] = (counts[n.tool]||0)+1;
+        const t = n.tokens; if (t) ti += (t.input||0)+(t.cache_read||0)+(t.cache_create||0)+(t.cache_write||0);
+      }
+      return { tools: Object.entries(counts).map(([t,c])=>({tool:t,count:c,tag:leafTagClass(t)})), totalIn: ti };
+    }
+
+    return { respOpen, hasKids, isExpanded, isAgent, isSkill, isContainer,
+             tok, totalIn, totalOut, hasTok, label, desc, resp, tagClass, answerExcerpt,
+             toggle, goParent, fmtK, fmtT,
+             childGroups, collapsedGroups, toggleGroup, cmdSummary };
+  },
+  template: `
+    <div :id="'node-'+node.id">
+
+      <!-- ═══ AGENT NODE — prominent container ═══ -->
+      <div v-if="isAgent" class="n-agent">
+        <div class="n-agent__hdr" @click="toggle">
+          <div class="n-agent__icon">A</div>
+          <span class="n-agent__title">{{ label }}</span>
+          <span class="n-agent__desc" v-if="desc">{{ desc }}</span>
+          <div class="n-agent__meta">
+            <span v-if="hasTok" class="n-agent__tokens">
+              <span class="t-in">&uarr;{{ fmtK(totalIn) }}</span>
+              <span class="t-out">&darr;{{ fmtK(totalOut) }}</span>
+            </span>
+            <span v-if="node.status==='active'" class="n-agent__status n-agent__status--active">RUNNING</span>
+            <span class="n-agent__toggle" v-if="hasKids">{{ isExpanded ? '▼' : '▶' }} {{ node.children.length }}</span>
+          </div>
+        </div>
+        <div v-if="answerExcerpt" class="n-agent__answer" @click.stop="respOpen=!respOpen">
+          <div class="n-agent__answer-hdr">
+            <span class="n-agent__answer-icon">&#x1F4AC;</span>
+            <span class="n-agent__answer-label">Answer</span>
+            <span style="font-size:9px;color:var(--text-3);margin-left:auto">{{ respOpen ? '▼ full' : '▶ full' }}</span>
+          </div>
+          <div class="n-agent__answer-text">{{ respOpen ? resp : answerExcerpt + (answerExcerpt.length >= 300 ? '...' : '') }}</div>
+        </div>
+        <div v-else-if="resp" style="padding:4px 12px 6px;border-top:1px solid var(--agent-bdr);font-size:10px">
+          <button style="background:none;border:none;font-size:10px;color:var(--text-3);cursor:pointer;font-family:inherit"
+                  @click.stop="respOpen=!respOpen">{{ respOpen ? '▼' : '▶' }} response</button>
+          <pre v-if="respOpen" class="n-leaf__resp" style="margin-left:0;margin-top:4px">{{ resp }}</pre>
+        </div>
+        <div class="n-agent__children" v-if="isExpanded && hasKids">
+          <template v-for="(g,gi) in childGroups" :key="gi">
+            <div v-if="g.type==='parallel'" class="n-parallel">
+              <div class="n-parallel__hdr">{{ g.nodes.length }} parallel agents</div>
+              <div class="n-parallel__cols">
+                <div class="n-parallel__col" v-for="c in g.nodes" :key="c.id">
+                  <flow-node :node="c" :token-index="tokenIndex" :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+                </div>
+              </div>
+            </div>
+            <div v-else-if="g.type==='cmdgroup'" class="n-cmdgroup">
+              <div class="n-cmdgroup__hdr" @click="toggleGroup(g.nodes[0].id)">
+                <span class="n-cmdgroup__count">{{ g.nodes.length }} operations</span>
+                <div class="n-cmdgroup__tools">
+                  <span v-for="t in cmdSummary(g.nodes).tools" :key="t.tool" :class="['n-cmdgroup__pill', t.tag]">
+                    {{ t.tool }}{{ t.count > 1 ? ' ×'+t.count : '' }}
+                  </span>
+                </div>
+                <span class="n-cmdgroup__tokens" v-if="cmdSummary(g.nodes).totalIn">
+                  <span class="t-in">&uarr;{{ fmtK(cmdSummary(g.nodes).totalIn) }}</span>
+                </span>
+                <span class="n-cmdgroup__chev">{{ collapsedGroups.has(g.nodes[0].id) ? '▶' : '▼' }}</span>
+              </div>
+              <div class="n-cmdgroup__body" v-if="!collapsedGroups.has(g.nodes[0].id)">
+                <flow-node v-for="c in g.nodes" :key="c.id" :node="c" :token-index="tokenIndex"
+                           :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+              </div>
+            </div>
+            <flow-node v-else v-for="c in g.nodes" :key="c.id" :node="c" :token-index="tokenIndex"
+                       :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ SKILL NODE — similar to agent but purple ═══ -->
+      <div v-else-if="isSkill" class="n-skill">
+        <div class="n-skill__hdr" @click="toggle">
+          <div class="n-skill__icon">S</div>
+          <span style="font-weight:600;font-size:12px;color:var(--skill)">{{ label }}</span>
+          <span v-if="desc" style="font-size:11px;color:var(--text-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ desc }}</span>
+          <span v-if="hasTok" class="n-agent__tokens">
+            <span class="t-in">&uarr;{{ fmtK(totalIn) }}</span> <span class="t-out">&darr;{{ fmtK(totalOut) }}</span>
+          </span>
+          <span v-if="node.status==='active'" class="n-agent__status n-agent__status--active">RUNNING</span>
+          <span v-if="node.status==='pending'" style="font-size:9px;color:var(--text-3)">pending</span>
+          <span class="n-agent__toggle" v-if="hasKids">{{ isExpanded ? '▼' : '▶' }} {{ node.children.length }}</span>
+        </div>
+        <div v-if="answerExcerpt" class="n-agent__answer" style="border-color:#ddd6fe" @click.stop="respOpen=!respOpen">
+          <div class="n-agent__answer-hdr">
+            <span class="n-agent__answer-icon">&#x1F4AC;</span>
+            <span class="n-agent__answer-label">Answer</span>
+            <span style="font-size:9px;color:var(--text-3);margin-left:auto">{{ respOpen ? '▼ full' : '▶ full' }}</span>
+          </div>
+          <div class="n-agent__answer-text">{{ respOpen ? resp : answerExcerpt + (answerExcerpt.length >= 300 ? '...' : '') }}</div>
+        </div>
+        <div v-else-if="resp" style="padding:4px 10px 6px;border-top:1px solid #ddd6fe;font-size:10px">
+          <button style="background:none;border:none;font-size:10px;color:var(--text-3);cursor:pointer;font-family:inherit"
+                  @click.stop="respOpen=!respOpen">{{ respOpen ? '▼' : '▶' }} response</button>
+          <pre v-if="respOpen" class="n-leaf__resp" style="margin-left:0;margin-top:4px">{{ resp }}</pre>
+        </div>
+        <div v-if="isExpanded && hasKids" class="n-skill__children">
+          <template v-for="(g,gi) in childGroups" :key="gi">
+            <flow-node v-if="g.type==='single'||g.type==='parallel'" v-for="c in g.nodes" :key="c.id"
+                       :node="c" :token-index="tokenIndex" :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+            <div v-else-if="g.type==='cmdgroup'" class="n-cmdgroup">
+              <div class="n-cmdgroup__hdr" @click="toggleGroup(g.nodes[0].id)">
+                <span class="n-cmdgroup__count">{{ g.nodes.length }} operations</span>
+                <div class="n-cmdgroup__tools">
+                  <span v-for="t in cmdSummary(g.nodes).tools" :key="t.tool" :class="['n-cmdgroup__pill', t.tag]">{{ t.tool }}{{ t.count>1?' ×'+t.count:'' }}</span>
+                </div>
+                <span class="n-cmdgroup__chev">{{ collapsedGroups.has(g.nodes[0].id) ? '▶' : '▼' }}</span>
+              </div>
+              <div class="n-cmdgroup__body" v-if="!collapsedGroups.has(g.nodes[0].id)">
+                <flow-node v-for="c in g.nodes" :key="c.id" :node="c" :token-index="tokenIndex"
+                           :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ LEAF NODE — compact single row ═══ -->
+      <div v-else>
+        <div :class="['n-leaf', hasKids ? 'n-leaf--expandable' : '']" @click="toggle">
+          <span v-if="hasKids" class="n-leaf__toggle">{{ isExpanded ? '▼' : '▶' }}</span>
+          <span :class="['n-leaf__tag', tagClass]">{{ node.tool }}</span>
+          <span class="n-leaf__label" :title="label">{{ label || '—' }}</span>
+          <span v-if="hasKids" class="n-leaf__toggle" style="font-size:9px;color:var(--text-3)">{{ node.children.length }}</span>
+          <span v-if="hasTok" class="n-leaf__tokens">
+            <span class="t-in">&uarr;{{ fmtK(totalIn) }}</span>
+            <span class="t-out">&darr;{{ fmtK(totalOut) }}</span>
+            <span v-if="tok.duration_ms" class="t-dur">{{ tok.duration_ms }}ms</span>
+          </span>
+          <span v-if="node.status==='active'" class="n-leaf__status">RUNNING</span>
+          <button v-if="resp" class="n-leaf__resp-btn" @click.stop="respOpen=!respOpen">{{ respOpen ? '▼' : '▶' }}</button>
+        </div>
+        <pre v-if="respOpen && resp" class="n-leaf__resp">{{ resp }}</pre>
+        <div v-if="isExpanded && hasKids" class="n-leaf__children">
+          <flow-node v-for="c in node.children" :key="c.id" :node="c" :token-index="tokenIndex"
+                     :depth="depth+1" :expanded-set="expandedSet" @toggle="$emit('toggle',$event)" />
+        </div>
+      </div>
+    </div>
+  `
+};
+FlowNode.components = { 'flow-node': FlowNode };
+
+// ─── Process / BPMN Node Component ──────────────────────────────────────
+const ProcessNode = {
+  name: 'ProcessNode',
+  props: { node: Object, sessionTreeMap: Object, sessionDescMap: Object },
+  setup(props) {
+    const isAgent = computed(() => props.node.tool === 'Agent');
+    const isSkill = computed(() => props.node.tool === 'Skill');
+    const isUser = computed(() => props.node.tool === 'User' || props.node.tool === 'Command');
+    const isSkillListing = computed(() => props.node.tool === 'SkillListing');
+    const skillsOpen = ref(false);
+
+    const childTree = computed(() => {
+      if (!isAgent.value || !props.sessionDescMap || !props.sessionTreeMap) return null;
+      const desc = String(props.node.input?.description || '').trim();
+      if (!desc) return null;
+      const sid = props.sessionDescMap.get(desc);
+      return sid ? (props.sessionTreeMap.get(sid) || null) : null;
+    });
+
+    const isContainer = computed(() =>
+      (isAgent.value || isSkill.value) && (props.node.children?.length > 0 || !!childTree.value)
+    );
+    const label = computed(() => getLabel(props.node));
+    const desc = computed(() => getDescription(props.node));
+
+    function taskClass(tool) {
+      if (!tool) return 'bp-task--default';
+      if (tool === 'Agent') return 'bp-task--agent';
+      if (tool === 'Skill' || tool === 'AgentSetting') return 'bp-task--skill';
+      if (tool === 'User' || tool === 'Command') return 'bp-task--user';
+      if (tool === 'Bash') return 'bp-task--bash';
+      if (tool === 'Read' || tool === 'Glob' || tool === 'Grep') return 'bp-task--read';
+      if (tool === 'Edit' || tool === 'Write') return 'bp-task--edit';
+      if (tool === 'SendMessage') return 'bp-task--send';
+      if (tool?.startsWith('mcp__')) return 'bp-task--mcp';
+      return 'bp-task--default';
+    }
+
+    function toolIcon(tool) {
+      if (tool === 'Agent') return 'A';
+      if (tool === 'Skill') return 'S';
+      if (tool === 'AgentSetting') return '⚙';
+      if (tool === 'SkillListing') return '⚙';
+      if (tool === 'User' || tool === 'Command') return '✍';
+      if (tool === 'Bash') return '$';
+      if (tool === 'Read' || tool === 'Glob' || tool === 'Grep') return '⚐';
+      if (tool === 'Edit' || tool === 'Write') return '✎';
+      if (tool === 'SendMessage') return '✉';
+      if (tool?.startsWith('mcp__')) return 'M';
+      return '•';
+    }
+
+    const childGroups = computed(() => {
+      const kids = props.node.children || [];
+      if (!kids.length) return [];
+
+      // If every child is an Agent and each links to a loaded child session,
+      // treat them all as parallel even when the log shows them sequentially.
+      const allAgentsWithSessions = kids.length > 1
+        && kids.every(ch => ch.tool === 'Agent')
+        && props.sessionDescMap
+        && kids.every(ch => {
+          const desc = String(ch.input?.description || '').trim();
+          return desc && props.sessionDescMap.get(desc);
+        });
+      if (allAgentsWithSessions) return [{ parallel: true, nodes: kids }];
+
+      const groups = []; let pb = [];
+      for (const ch of kids) {
+        if (ch.parallel) pb.push(ch);
+        else { if (pb.length) { groups.push({ parallel: true, nodes: pb }); pb = []; } groups.push({ parallel: false, nodes: [ch] }); }
+      }
+      if (pb.length) groups.push({ parallel: true, nodes: pb });
+      return groups;
+    });
+
+    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, label, desc, taskClass, toolIcon, childGroups, childTree };
+  },
+  template: `
+    <div class="bp-flow">
+      <div class="bp-conn"></div>
+      <div v-if="isContainer" :class="['bp-subprocess', isSkill ? 'bp-subprocess--skill' : '']">
+        <div class="bp-subprocess__hdr">
+          <div :class="['bp-subprocess__icon', isAgent ? 'bp-subprocess__icon--agent' : 'bp-subprocess__icon--skill']">
+            {{ isAgent ? 'A' : 'S' }}
+          </div>
+          <span class="bp-subprocess__name">{{ label }}</span>
+          <span v-if="desc" class="bp-subprocess__desc">{{ desc }}</span>
+          <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF; RUNNING</span>
+        </div>
+        <div class="bp-subprocess__body">
+          <template v-for="(g, gi) in childGroups" :key="gi">
+            <template v-if="g.parallel">
+              <div class="bp-conn"></div>
+              <div class="bp-gateway"><span class="bp-gateway__inner">+</span></div>
+              <div class="bp-conn"></div>
+              <div class="bp-parallel">
+                <div v-for="c in g.nodes" :key="c.id" class="bp-branch">
+                  <process-node :node="c" :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap" />
+                </div>
+              </div>
+              <div class="bp-conn"></div>
+              <div class="bp-gateway"><span class="bp-gateway__inner">+</span></div>
+            </template>
+            <template v-else>
+              <process-node v-for="c in g.nodes" :key="c.id" :node="c" :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap" />
+            </template>
+          </template>
+          <template v-if="childTree">
+            <div v-if="childGroups.length" class="bp-conn"></div>
+            <div class="bp-child-session-label">&#x21B3; spawned session</div>
+            <process-node v-for="child in childTree.children" :key="child.id" :node="child" :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap" />
+          </template>
+        </div>
+      </div>
+      <div v-else-if="isSkillListing" class="bp-skill-node" @click="skillsOpen = !skillsOpen">
+        <div class="bp-skill-node__hdr">
+          <div class="bp-task__icon" style="background:var(--skill);border-radius:5px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">⚙</div>
+          <div class="bp-task__body">
+            <div class="bp-task__type" style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--skill)">Skills loaded</div>
+            <div class="bp-task__label">{{ node.input.skillCount }} skills &nbsp;<span style="color:var(--text-3);font-size:10px">{{ skillsOpen ? '▼' : '▶' }}</span></div>
+          </div>
+        </div>
+        <div v-if="skillsOpen && node.input.skills && node.input.skills.length" class="bp-skill-pills">
+          <span v-for="s in node.input.skills" :key="s" class="bp-skill-pill">{{ s }}</span>
+        </div>
+      </div>
+      <div v-else :class="['bp-task', taskClass(node.tool)]" :title="label">
+        <div class="bp-task__icon">{{ toolIcon(node.tool) }}</div>
+        <div class="bp-task__body">
+          <div v-if="node.tool !== 'User' && node.tool !== 'Command'" class="bp-task__type">{{ node.tool }}</div>
+          <div class="bp-task__label">{{ label || node.cmd || '—' }}</div>
+        </div>
+        <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF;</span>
+      </div>
+    </div>
+  `
+};
+ProcessNode.components = { 'process-node': ProcessNode };
+
+// ─── Team View ────────────────────────────────────────────────────────────
+const TeamView = {
+  name: 'TeamView',
+  props: { teamSessions: Array, sessionTreeMap: Object, sessionDescMap: Object, onNavigate: Function },
+  setup(props) {
+    const expanded = reactive(new Set());
+    function toggle(id) {
+      if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+    }
+    function navigate(id, e) {
+      e.stopPropagation();
+      if (props.onNavigate) props.onNavigate(id);
+    }
+    return { expanded, toggle, navigate };
+  },
+  template: `
+    <div class="team-view">
+      <div class="team-view__hdr">&#x229E; Team members</div>
+      <div class="team-cards">
+        <div v-for="s in teamSessions" :key="s.id"
+             :class="['tm-card', expanded.has(s.id) ? 'tm-card--expanded' : '']">
+          <div class="tm-card__hdr" @click="toggle(s.id)">
+            <span class="tm-card__agent">{{ s.info.agent_name }}</span>
+            <span v-if="s.info.is_active" class="tm-card__live">LIVE</span>
+            <span class="tm-card__stats">{{ s.info.event_count }}ev</span>
+            <button class="tm-card__nav" @click="navigate(s.id, $event)" title="Open this session">&#x2197;</button>
+            <span class="tm-card__chev">{{ expanded.has(s.id) ? '▼' : '▶' }}</span>
+          </div>
+          <div v-if="s.info.title" class="tm-card__title">{{ s.info.title }}</div>
+          <div v-if="expanded.has(s.id)" class="tm-card__body">
+            <template v-if="s.tree && s.tree.children.length">
+              <process-node v-for="child in s.tree.children" :key="child.id"
+                            :node="child" :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap" />
+            </template>
+            <div v-else class="empty" style="padding:24px 16px;font-size:11px">No process entries</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+};
+TeamView.components = { 'process-node': ProcessNode };
+
+// ─── Main App ────────────────────────────────────────────────────────────
+const app = createApp({
+  components: { 'flow-node': FlowNode, 'process-node': ProcessNode, 'team-view': TeamView },
+  setup() {
+    const sidebarWidth = ref(280);
+    const sidebarDragging = ref(false);
+
+    function startSidebarResize(e) {
+      sidebarDragging.value = true;
+      const startX = e.clientX;
+      const startWidth = sidebarWidth.value;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMove(ev) {
+        sidebarWidth.value = Math.max(180, Math.min(600, startWidth + ev.clientX - startX));
+      }
+      function onUp() {
+        sidebarDragging.value = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      }
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    function startRawResize(e) {
+      rawDragging.value = true;
+      const startX = e.clientX;
+      const startWidth = rawPanelWidth.value;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      function onMove(ev) {
+        rawPanelWidth.value = Math.max(200, Math.min(900, startWidth - (ev.clientX - startX)));
+      }
+      function onUp() {
+        rawDragging.value = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      }
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    function toggleRawLine(i) {
+      if (openRawLines[i]) delete openRawLines[i];
+      else openRawLines[i] = true;
+    }
+
+    const sessions = ref([]);
+    const activeSession = ref(null);
+    const entries = ref([]);
+    const stats = ref(null);
+    const liveConnected = ref(true);
+    const reloading = ref(false);
+    const tab = ref('tree');
+    const autoScroll = ref(true);
+    const sessionSearch = ref('');
+    const eventSearch = ref('');
+    const eventToolFilter = ref('');
+    const eventDirFilter = reactive({ pre: true, post: true, command: true, prompt: true });
+    const openResps = reactive({});
+    const collapsedProjects = reactive({});
+    const selectMode = ref(false);
+    const selectedSessions = ref(new Set());
+    const expandedSet = ref(new Set());
+    const treeWrap = ref(null);
+    const eventsTable = ref(null);
+    const searchInput = ref(null);
+    const rawPanel = ref(null);
+    const showRawLog = ref(false);
+    const rawPanelWidth = ref(420);
+    const rawDragging = ref(false);
+    const openRawLines = reactive({});
+
+    // ── Teams state ──────────────────────────────────────────────────────────
+    const teams = ref([]);
+    const activeTeam = ref(null);
+    const teamMessages = ref([]);
+    const teamsCollapsed = ref(false);
+    const teamFeed = ref(null);
+
+    const activeTeamData = computed(() =>
+      teams.value.find(t => t.name === activeTeam.value) || null
+    );
+
+    const agentMessageGroups = computed(() => {
+      if (!activeTeamData.value) return [];
+      return activeTeamData.value.members.map(m => ({
+        agent: m,
+        messages: teamMessages.value.filter(msg => msg.to === m.name || msg.to === m.agentId),
+      }));
+    });
+
+    async function loadTeams() {
+      if (!window.electronAPI.getTeams) return;
+      try { teams.value = await window.electronAPI.getTeams(); }
+      catch(e) { console.error('[Teams] loadTeams failed:', e); }
+    }
+
+    async function selectTeam(name) {
+      activeTeam.value = name;
+      tab.value = 'teams';
+      try {
+        teamMessages.value = await window.electronAPI.getTeamMessages(name);
+      } catch(e) {}
+    }
+
+    function connectTeamsStream() {
+      if (!window.electronAPI.onTeamsUpdate) return;
+      window.electronAPI.onTeamsUpdate(async () => {
+        await loadTeams();
+        if (activeTeam.value) {
+          try {
+            teamMessages.value = await window.electronAPI.getTeamMessages(activeTeam.value);
+          } catch(e) {}
+        }
+      });
+    }
+
+    const teamArchiving = ref(false);
+
+    async function archiveCurrentTeam() {
+      if (!activeTeam.value || teamArchiving.value) return;
+      teamArchiving.value = true;
+      try { await window.electronAPI.archiveTeam(activeTeam.value); }
+      catch(e) { console.error('[Teams] archive failed:', e); }
+      teamArchiving.value = false;
+    }
+
+    const revokedTeamPending = ref(null);
+    const revokedArchiving = ref(false);
+
+    function connectRevocationListener() {
+      if (!window.electronAPI.onTeamRevoked) return;
+      window.electronAPI.onTeamRevoked((teamName) => {
+        revokedTeamPending.value = teamName;
+      });
+    }
+
+    async function handleRevokedClose() {
+      const name = revokedTeamPending.value;
+      revokedTeamPending.value = null;
+      if (activeTeam.value === name) {
+        activeTeam.value = null;
+        teamMessages.value = [];
+      }
+      await loadTeams();
+    }
+
+    async function handleRevokedArchive() {
+      const name = revokedTeamPending.value;
+      if (!name) return;
+      revokedArchiving.value = true;
+      try {
+        await window.electronAPI.archiveTeam(name);
+      } catch(e) { console.error('[Teams] archive failed:', e); }
+      revokedArchiving.value = false;
+      revokedTeamPending.value = null;
+      if (activeTeam.value === name) {
+        activeTeam.value = null;
+        teamMessages.value = [];
+      }
+      await loadTeams();
+    }
+    // ── End Teams state ──────────────────────────────────────────────────────
+
+    // ── Token analytics ──────────────────────────────────────────────────────
+    const TOKEN_PRICES = { input: 3e-6, output: 15e-6, cache_create: 3.75e-6, cache_read: 0.3e-6 };
+
+    function classifyTurnTools(tools) {
+      if (!tools?.length) return 'Other';
+      if (tools.some(t => t === 'Agent' || t === 'Skill')) return 'Delegation';
+      if (tools.some(t => ['TaskCreate','TaskUpdate','TaskGet','TaskList','TaskStop','TaskOutput'].includes(t))) return 'Planning';
+      if (tools.some(t => t === 'Edit' || t === 'Write' || t === 'MultiEdit')) return 'Coding';
+      if (tools.some(t => t === 'Bash' || t === 'Command')) return 'Shell';
+      if (tools.some(t => t === 'SendMessage')) return 'Messaging';
+      if (tools.some(t => t.startsWith('mcp__'))) return 'MCP';
+      if (tools.some(t => t === 'Read' || t === 'Glob' || t === 'Grep')) return 'Reading';
+      return 'Other';
+    }
+
+    const tokenStats = computed(() => {
+      if (!stats.value) return null;
+      const t = stats.value.tokens;
+      const total = t.input + t.output + t.cache_read + t.cache_create;
+      if (!total) return null;
+
+      const cost = t.input * TOKEN_PRICES.input + t.output * TOKEN_PRICES.output
+                 + t.cache_create * TOKEN_PRICES.cache_create + t.cache_read * TOKEN_PRICES.cache_read;
+
+      const allInput = t.input + t.cache_read + t.cache_create;
+      const cacheHitRate = allInput > 0 ? (t.cache_read / allInput) * 100 : 0;
+
+      // Per-category token totals from timeline
+      const cats = {};
+      for (const entry of (stats.value.timeline || [])) {
+        const cat = classifyTurnTools(entry.tools);
+        if (!cats[cat]) cats[cat] = { input: 0, output: 0, cache_read: 0, cache_create: 0 };
+        cats[cat].input += entry.input || 0;
+        cats[cat].output += entry.output || 0;
+        cats[cat].cache_read += entry.cache_read || 0;
+        cats[cat].cache_create += entry.cache_create || 0;
+      }
+      const catList = Object.entries(cats).map(([name, c]) => ({
+        name,
+        total: c.input + c.output + c.cache_read + c.cache_create,
+        cost: c.input * TOKEN_PRICES.input + c.output * TOKEN_PRICES.output
+            + c.cache_create * TOKEN_PRICES.cache_create + c.cache_read * TOKEN_PRICES.cache_read,
+      })).sort((a, b) => b.total - a.total);
+      const maxCatTotal = catList[0]?.total || 1;
+
+      // Tool call counts
+      const toolList = Object.entries(stats.value.tools || {})
+        .sort((a, b) => b[1] - a[1]).slice(0, 12);
+      const maxToolCalls = toolList[0]?.[1] || 1;
+
+      return { tokens: t, total, cost, cacheHitRate, catList, maxCatTotal, toolList, maxToolCalls };
+    });
+    // ── End Token analytics ───────────────────────────────────────────────────
+
+    const treeData = shallowRef(null);
+    const treeVersion = ref(0);
+    const tree = computed(() => { treeVersion.value; return treeData.value?.root || null; });
+    const tokenIndex = computed(() => { treeVersion.value; return buildTokenIndex(entries.value, stats.value?.timeline || []); });
+    const topTools = computed(() => Object.entries(stats.value?.tools||{}).sort((a,b)=>b[1]-a[1]).slice(0,6));
+    const rawLines = computed(() => entries.value.map(e => ({ compact: JSON.stringify(e), pretty: JSON.stringify(e, null, 2) })));
+
+    const childSessionEntries = ref(new Map());
+    const childSessionTreeMap = computed(() => {
+      const map = new Map();
+      for (const [sid, ents] of childSessionEntries.value) {
+        if (ents.length) map.set(sid, buildTree(ents).root);
+      }
+      return map;
+    });
+    const childSessionDescMap = computed(() => {
+      const map = new Map();
+      for (const [sid] of childSessionEntries.value) {
+        const info = sessionMap.value.get(sid);
+        const desc = (info?.agent_description || '').trim();
+        if (desc) map.set(desc, sid);
+      }
+      return map;
+    });
+
+    const isTeamLead = computed(() => {
+      const info = sessionMap.value.get(activeSession.value);
+      return !!(info?.team_name && !info?.agent_name);
+    });
+
+    const teamMemberSessions = computed(() => {
+      if (!isTeamLead.value) return [];
+      const info = sessionMap.value.get(activeSession.value);
+      return (info?.child_ids || [])
+        .map(id => ({
+          id,
+          info: sessionMap.value.get(id),
+          tree: childSessionTreeMap.value.get(id) || null,
+        }))
+        .filter(s => s.info?.agent_name)
+        .sort((a, b) => (a.info.first_ts || '').localeCompare(b.info.first_ts || ''));
+    });
+
+    async function loadChildSessions(parentId) {
+      const info = sessionMap.value.get(parentId);
+      if (!info?.child_ids?.length) return;
+      const newMap = new Map(childSessionEntries.value);
+      let changed = false;
+      for (const childId of info.child_ids) {
+        if (newMap.has(childId)) continue;
+        try {
+          const er = await window.electronAPI.getSession(childId);
+          newMap.set(childId, er.entries || []);
+          changed = true;
+        } catch(e) {}
+      }
+      if (changed) childSessionEntries.value = newMap;
+      for (const childId of info.child_ids) {
+        await loadChildSessions(childId);
+      }
+    }
+
+    const sessionTitle = computed(() => {
+      if (!activeSession.value) return '';
+      const first = entries.value.find(e => e.event === 'prompt' && e.tool === 'User');
+      if (first?.cmd) return first.cmd;
+      const info = sessionMap.value.get(activeSession.value);
+      return info?.agent_description || info?.title || '';
+    });
+
+    const estimatedCost = computed(() => {
+      const t = stats.value?.tokens; if (!t) return null;
+      const cost = (t.input||0)*3/1e6 + (t.output||0)*15/1e6 + (t.cache_read||0)*0.30/1e6 + (t.cache_create||0)*3.75/1e6;
+      return cost < 0.005 ? null : (cost < 1 ? cost.toFixed(2) : cost.toFixed(1));
+    });
+
+    const sessionDuration = computed(() => {
+      if (!entries.value.length) return '';
+      const first = entries.value[0]?.ts, last = entries.value[entries.value.length-1]?.ts;
+      if (!first || !last) return '';
+      const ms = new Date(last) - new Date(first);
+      if (ms < 0) return '';
+      const min = Math.floor(ms/60000), sec = Math.floor((ms%60000)/1000);
+      return min>60 ? `${Math.floor(min/60)}h${min%60}m` : min>0 ? `${min}m${sec}s` : `${sec}s`;
+    });
+
+    const sessionMap = computed(() => {
+      const map = new Map();
+      for (const s of sessions.value) map.set(s.session_id, s);
+      return map;
+    });
+
+    const expandedParents = reactive({});
+    function toggleParentExpand(id) {
+      if (expandedParents[id]) delete expandedParents[id];
+      else expandedParents[id] = true;
+    }
+
+    const activeParentSession = computed(() => {
+      if (!activeSession.value) return null;
+      const info = sessionMap.value.get(activeSession.value);
+      if (!info?.parent_id) return null;
+      return sessionMap.value.get(info.parent_id) || null;
+    });
+
+    const filteredProjectGroups = computed(() => {
+      const q = sessionSearch.value.toLowerCase().trim();
+      const allIds = new Set(sessions.value.map(s => s.session_id));
+      // Exclude subagent sessions whose parent is present — they appear as children under the parent
+      let list = sessions.value.filter(s => !s.parent_id || !allIds.has(s.parent_id));
+      if (q) list = list.filter(s => (s.project||'').toLowerCase().includes(q) || (s.session_id||'').toLowerCase().includes(q) || (s.first_ts||'').includes(q));
+      const map = {};
+      for (const s of list) { const p=s.project||''; if (!map[p]) map[p]=[]; map[p].push(s); }
+      const activeSess = sessionMap.value.get(activeSession.value);
+      const ap = activeSess ? (activeSess.parent_id ? (sessionMap.value.get(activeSess.parent_id)?.project || activeSess.project) : activeSess.project) : '';
+      return Object.entries(map).sort(([a],[b])=>{ if (a===ap) return -1; if (b===ap) return 1; return a.localeCompare(b); })
+                   .map(([project,sessions])=>({project,sessions}));
+    });
+
+    function groupByDate(sl) {
+      const groups = {};
+      for (const s of sl) { const d=s.first_ts?s.first_ts.slice(0,10):'unknown'; if (!groups[d]) groups[d]=[]; groups[d].push(s); }
+      const today = new Date().toISOString().slice(0,10), yday = new Date(Date.now()-864e5).toISOString().slice(0,10);
+      return Object.entries(groups).map(([date,sessions])=>{
+        let label = date;
+        if (date===today) label='Today'; else if (date===yday) label='Yesterday';
+        else { const d=new Date(date); if (!isNaN(d)) label=d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+        return {label,sessions};
+      });
+    }
+    function timeOf(ts) { return ts ? ts.slice(11,16) : '--:--'; }
+
+    const availableTools = computed(() => { const s=new Set(); for (const e of entries.value) if (e.tool) s.add(e.tool); return [...s].sort(); });
+    const filteredEvents = computed(() => {
+      const q = eventSearch.value.toLowerCase().trim();
+      return entries.value.map((e,i)=>({...e,_idx:i})).filter(e => {
+        if (!eventDirFilter[e.event]) return false;
+        if (eventToolFilter.value && e.tool!==eventToolFilter.value) return false;
+        if (q) { const s=summarise(e).toLowerCase(), t=(e.tool||'').toLowerCase(); if (!s.includes(q)&&!t.includes(q)) return false; }
+        return true;
+      });
+    });
+
+    // Index action_id → entry for fast post→pre tool lookup
+    const actionIndex = computed(() => {
+      const m = new Map();
+      for (const e of entries.value) if (e.action_id) m.set(e.action_id, e);
+      return m;
+    });
+
+    function resolvePostTool(e) {
+      const pre = actionIndex.value.get(e.action_id);
+      return pre?.tool || '';
+    }
+
+    function summarise(e) {
+      if (e.event === 'post') {
+        const r = e.response;
+        if (!r && !e.cmd) return '(empty result)';
+        const text = typeof r === 'string' ? r : (r?.stdout || r?.content || JSON.stringify(r) || '');
+        return text.replace(/\s+/g, ' ').trim().slice(0, 120) || '(empty result)';
+      }
+      if (e.cmd) return e.cmd;
+      const i=e.input||{};
+      switch (e.tool) {
+        case 'Agent': return `[${i.agent||i.subagent_type||'?'}] ${i.description||''}`;
+        case 'Skill': return `${i.skill||''}${i.args?' '+i.args:''}`;
+        case 'SendMessage': return `→ ${i.to||''}: ${(i.message||'').slice(0,80)}`;
+        case 'TaskCreate': return i.title || JSON.stringify(i).slice(0,80);
+        case 'TaskUpdate': return `${i.id||''} → ${i.status||''}`;
+        case 'Bash': return i.description || (i.command||'').slice(0,80);
+        case 'Read': case 'Glob': case 'Grep': return (i.path||i.file_path||i.pattern||'').split('/').slice(-3).join('/');
+        case 'Edit': case 'Write': return (i.file_path||'').split('/').slice(-3).join('/');
+        case 'Command': return `${i.command||''} ${i.args||''}`.trim();
+        case 'User': return (i.message||'').slice(0,120);
+        case 'AgentSetting': return `skill: ${i.skill||''}`;
+        case 'SkillListing': return `${i.skillCount ?? 0} skills available`;
+        default:
+          if (e.tool?.startsWith('mcp__')) return e.tool.replace(/^mcp__[^_]+__/, '');
+          return JSON.stringify(i).slice(0,100);
+      }
+    }
+    function fmtResp(r) {
+      if (r==null||r==='') return '';
+      if (typeof r==='object') {
+        if (r.stdout!=null||r.stderr!=null) { const p=[]; if (r.exit_code!=null&&r.exit_code!==0) p.push('exit: '+r.exit_code); if (r.stdout) p.push(String(r.stdout)); if (r.stderr) p.push('stderr: '+String(r.stderr)); if (r.interrupted) p.push('[interrupted]'); return p.join('\n')||'(empty)'; }
+        if (r.files) return `${r.count||0} files: ${Array.isArray(r.files)?r.files.join(', '):r.files}`;
+        if (r.matches) return `${r.num_files||0} files matched\n${r.matches}`;
+        if (r.content) return extractContentText(r.content);
+        return JSON.stringify(r,null,2);
+      }
+      return String(r);
+    }
+    function toolClass(tool) { if (!tool) return 'default'; if (tool.startsWith('mcp__')) return 'mcp'; return tool.toLowerCase(); }
+    function toggleEventResp(i) { if (openResps[i]) delete openResps[i]; else openResps[i]=true; }
+    function toggleProject(n) { if (collapsedProjects[n]) delete collapsedProjects[n]; else collapsedProjects[n]=true; }
+
+    function isProjectFullySelected(grp) {
+      return grp.sessions.length > 0 && grp.sessions.every(s => selectedSessions.value.has(s.session_id));
+    }
+    function isProjectPartiallySelected(grp) {
+      return grp.sessions.some(s => selectedSessions.value.has(s.session_id)) && !isProjectFullySelected(grp);
+    }
+    function toggleProjectSelect(grp) {
+      const s = new Set(selectedSessions.value);
+      if (isProjectFullySelected(grp)) {
+        grp.sessions.forEach(sess => s.delete(sess.session_id));
+      } else {
+        grp.sessions.forEach(sess => s.add(sess.session_id));
+        if (collapsedProjects[grp.project]) delete collapsedProjects[grp.project];
+      }
+      selectedSessions.value = s;
+    }
+
+    function toggleSelectMode() {
+      selectMode.value = !selectMode.value;
+      if (!selectMode.value) selectedSessions.value = new Set();
+    }
+    function toggleSessionSelect(id) {
+      const s = new Set(selectedSessions.value);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      selectedSessions.value = s;
+    }
+    function selectAllVisible() {
+      const s = new Set();
+      for (const grp of filteredProjectGroups.value) {
+        for (const sess of grp.sessions) s.add(sess.session_id);
+      }
+      selectedSessions.value = s;
+    }
+
+    let cleanupEntryListener = null;
+
+    async function deleteSessions(ids) {
+      try {
+        await window.electronAPI.deleteSessions(ids);
+        if (ids.includes(activeSession.value)) {
+          activeSession.value = null; entries.value = []; stats.value = null;
+          treeData.value = null; treeVersion.value++;
+          cleanupEntryListener?.(); cleanupEntryListener = null;
+        }
+        await loadSessions();
+      } catch(e) {}
+    }
+    async function deleteSingleSession(id) {
+      if (!confirm('Delete this session? This removes the underlying Claude session file.')) return;
+      await deleteSessions([id]);
+    }
+    async function deleteSelectedSessions() {
+      const ids = [...selectedSessions.value];
+      if (!ids.length) return;
+      if (!confirm(`Delete ${ids.length} session${ids.length > 1 ? 's' : ''}? This removes the underlying Claude session files.`)) return;
+      await deleteSessions(ids);
+      selectedSessions.value = new Set();
+      selectMode.value = false;
+    }
+
+    async function archiveSelectedSessions() {
+      const ids = [...selectedSessions.value];
+      if (!ids.length) return;
+      try {
+        const result = await window.electronAPI.archiveSessions(ids);
+        if (result?.cancelled) return;
+        selectedSessions.value = new Set();
+        selectMode.value = false;
+        await loadSessions();
+      } catch(e) {}
+    }
+    function onToggleNode(id) { const s=new Set(expandedSet.value); if (s.has(id)) s.delete(id); else s.add(id); expandedSet.value=s; }
+    function expandAll() {
+      if (!treeData.value) return; const s=new Set();
+      (function walk(n){ if (n.children?.length){ s.add(n.id); n.children.forEach(walk); } })(treeData.value.root);
+      expandedSet.value=s;
+    }
+    function collapseAll() { expandedSet.value=new Set(); }
+
+    async function loadSessions() {
+      try {
+        sessions.value = await window.electronAPI.getSessions();
+        for (const s of sessions.value) {
+          if (s.child_ids?.length && !(s.session_id in expandedParents)) {
+            expandedParents[s.session_id] = true;
+          }
+        }
+      } catch(e){}
+    }
+
+    async function reloadAll() {
+      if (reloading.value) return;
+      reloading.value = true;
+      const prevActive = activeSession.value;
+      try {
+        await window.electronAPI.reloadSessions();
+        await loadSessions();
+        if (prevActive) {
+          cleanupEntryListener?.(); cleanupEntryListener = null;
+          activeSession.value = prevActive;
+          entries.value = []; stats.value = null; treeData.value = null; treeVersion.value++;
+          expandedSet.value = new Set();
+          Object.keys(openResps).forEach(k => delete openResps[k]);
+          Object.keys(openRawLines).forEach(k => delete openRawLines[k]);
+          const [er, sr] = await Promise.all([
+            window.electronAPI.getSession(prevActive),
+            window.electronAPI.getStats(prevActive).catch(() => null),
+          ]);
+          entries.value = er.entries || []; stats.value = sr;
+          if (entries.value.length) { treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers(); }
+          await loadChildSessions(prevActive);
+          connectEntryListener(prevActive);
+        }
+      } catch(e) {}
+      finally { reloading.value = false; }
+    }
+
+    function autoExpandContainers() {
+      if (!treeData.value) return;
+      const s = new Set();
+      (function walk(n) {
+        if (n.children?.length && (n.tool==='Claude'||n.tool==='Agent'||n.tool==='Skill')) s.add(n.id);
+        n.children?.forEach(walk);
+      })(treeData.value.root);
+      expandedSet.value = s;
+    }
+
+    async function selectSession(id) {
+      if (id===activeSession.value) return;
+      cleanupEntryListener?.(); cleanupEntryListener = null;
+      activeSession.value=id; entries.value=[]; stats.value=null; treeData.value=null; treeVersion.value++;
+      expandedSet.value=new Set(); Object.keys(openResps).forEach(k=>delete openResps[k]);
+      Object.keys(openRawLines).forEach(k=>delete openRawLines[k]);
+      childSessionEntries.value=new Map();
+      try {
+        const [er, sr] = await Promise.all([
+          window.electronAPI.getSession(id),
+          window.electronAPI.getStats(id).catch(()=>null),
+        ]);
+        if (id!==activeSession.value) return;
+        entries.value = er.entries||[]; stats.value = sr;
+        if (entries.value.length) { treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers(); }
+        await loadChildSessions(id);
+      } catch(e){}
+      connectEntryListener(id);
+    }
+
+    function connectEntryListener(id) {
+      cleanupEntryListener = window.electronAPI.onSessionEntry((data) => {
+        if (data.sessionId !== id) return;
+        const entry = data.entry;
+        entries.value = [...entries.value, entry];
+        if (treeData.value) {
+          treeData.value = buildTree(entries.value); treeVersion.value++;
+          autoExpandContainers();
+        } else {
+          treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers();
+        }
+        if (autoScroll.value) {
+          nextTick(()=>{
+            if (tab.value==='tree' && treeWrap.value) treeWrap.value.scrollTop=treeWrap.value.scrollHeight;
+            if (tab.value==='events' && eventsTable.value) eventsTable.value.scrollTop=eventsTable.value.scrollHeight;
+            if (showRawLog.value && rawPanel.value) rawPanel.value.scrollTop=rawPanel.value.scrollHeight;
+          });
+        }
+      });
+    }
+
+    function connectGlobalStream() {
+      window.electronAPI.onGlobalUpdate(() => {
+        loadSessions();
+      });
+    }
+
+    function onKey(e) {
+      if (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') { if (e.key==='Escape') e.target.blur(); return; }
+      switch(e.key) {
+        case '/': e.preventDefault(); searchInput.value?.focus(); break;
+        case 'e': tab.value='events'; break;
+        case 't': tab.value='tree'; break;
+        case 'p': tab.value='process'; break;
+        case 'm': tab.value='teams'; break;
+        case 'k': tab.value='tokens'; break;
+        case 'j': case 'ArrowDown': { e.preventDefault(); const items=[...document.querySelectorAll('.sess')]; const cur=items.findIndex(el=>el.classList.contains('sess--active')); if (items[cur+1]) items[cur+1].click(); break; }
+        case 'k': case 'ArrowUp': { e.preventDefault(); const items=[...document.querySelectorAll('.sess')]; const cur=items.findIndex(el=>el.classList.contains('sess--active')); if (items[cur-1]) items[cur-1].click(); break; }
+        case 'Escape': collapseAll(); break;
+      }
+    }
+
+    watch(activeSession, (id) => {
+      if (!id) return;
+      const info = sessionMap.value.get(id);
+      if (info?.parent_id) expandedParents[info.parent_id] = true;
+    });
+
+    let pollTimer = null;
+
+    onMounted(async ()=>{
+      await loadSessions();
+      await loadTeams();
+      connectGlobalStream();
+      connectTeamsStream();
+      connectRevocationListener();
+      if (sessions.value.length) selectSession(sessions.value[0].session_id);
+      document.addEventListener('keydown', onKey);
+      pollTimer = setInterval(async () => { await loadSessions(); await loadTeams(); }, 30000);
+    });
+    onUnmounted(()=>{
+      cleanupEntryListener?.();
+      if (pollTimer) clearInterval(pollTimer);
+      document.removeEventListener('keydown', onKey);
+    });
+
+    return { sidebarWidth, sidebarDragging, startSidebarResize,
+             sessions, activeSession, entries, stats, liveConnected, reloading, reloadAll, tab, autoScroll,
+             sessionSearch, eventSearch, eventToolFilter, eventDirFilter, openResps,
+             collapsedProjects, expandedSet, treeWrap, eventsTable, searchInput,
+             tree, tokenIndex, topTools, estimatedCost, sessionDuration,
+             filteredProjectGroups, filteredEvents, availableTools,
+             groupByDate, timeOf, fmtK, fmtT, summarise, fmtResp, toolClass,
+             selectSession, toggleProject, toggleEventResp,
+             onToggleNode, expandAll, collapseAll,
+             selectMode, selectedSessions, toggleSelectMode,
+             toggleSessionSelect, selectAllVisible, isProjectFullySelected, isProjectPartiallySelected, toggleProjectSelect,
+             deleteSingleSession, deleteSelectedSessions,
+             archiveSelectedSessions,
+             sessionMap, expandedParents, toggleParentExpand, activeParentSession,
+             showRawLog, rawPanelWidth, rawDragging, rawPanel, rawLines, openRawLines,
+             startRawResize, toggleRawLine,
+             sessionTitle,
+             childSessionTreeMap, childSessionDescMap,
+             isTeamLead, teamMemberSessions,
+             teams, activeTeam, teamMessages, teamsCollapsed,
+             activeTeamData, agentMessageGroups, loadTeams, selectTeam,
+             teamArchiving, archiveCurrentTeam,
+             revokedTeamPending, revokedArchiving,
+             handleRevokedClose, handleRevokedArchive,
+             tokenStats, fmtCost, fmtCostSmall,
+             resolvePostTool };
+  }
+});
+app.mount('#app');

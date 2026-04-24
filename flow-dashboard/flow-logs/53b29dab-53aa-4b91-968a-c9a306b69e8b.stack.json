@@ -1,0 +1,1 @@
+{"stack": [{"action_id": "e65a5ced5377", "tool": "Bash"}], "pending": [{"tool": "Read", "action_id": "bb2469d8d343"}, {"tool": "Read", "action_id": "0566abb2ce15"}, {"tool": "Read", "action_id": "832ee2f549c2"}, {"tool": "Edit", "action_id": "68c9e0119d2c"}]}
