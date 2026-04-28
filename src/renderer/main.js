@@ -199,6 +199,92 @@ function _buildHeuristic(entries, root, nodeMap) {
   }
 }
 
+// ─── Step Grouping ───────────────────────────────────────────────────────
+const SOLO_TOOLS = new Set(['User', 'Command', 'SkillListing', 'AgentSetting']);
+const PARALLEL_GAP_MS = 10000;
+
+function isOrch(node) {
+  if (node.tool === 'Agent') return true;
+  // Skill is orch only when it actually nested operations
+  if (node.tool === 'Skill' && node.children?.length) return true;
+  return false;
+}
+
+function groupIntoSteps(node) {
+  const kids = node?.children || [];
+  const steps = [];
+  let buf = [];
+  const flushSeq = () => { if (buf.length) { steps.push({ kind:'seq', nodes:buf }); buf = []; } };
+  for (let i = 0; i < kids.length; ) {
+    const c = kids[i];
+    if (SOLO_TOOLS.has(c.tool)) { flushSeq(); steps.push({ kind:'solo', nodes:[c] }); i++; continue; }
+    if (!isOrch(c)) { buf.push(c); i++; continue; }
+    flushSeq();
+    // Cluster contiguous Agent siblings as parallel when they overlap in time
+    // or when buildTree flagged them, or when they fire within PARALLEL_GAP_MS.
+    if (c.tool === 'Agent') {
+      const grp = [c];
+      let j = i + 1;
+      while (j < kids.length && kids[j].tool === 'Agent') {
+        const prev = grp[grp.length - 1];
+        const gap = (new Date(kids[j].ts).getTime() - new Date(prev.ts).getTime());
+        const overlap = prev.postTs && new Date(kids[j].ts).getTime() < new Date(prev.postTs).getTime();
+        if (kids[j].parallel || prev.parallel || overlap || (Number.isFinite(gap) && gap >= 0 && gap < PARALLEL_GAP_MS)) {
+          grp.push(kids[j]); j++;
+        } else break;
+      }
+      if (grp.length > 1) { steps.push({ kind:'parallel', nodes: grp }); i = j; continue; }
+    }
+    // Single agent or skill orch step
+    steps.push({ kind:'orch', nodes: [c] });
+    i++;
+  }
+  flushSeq();
+  return steps;
+}
+
+function aggregateStep(nodes) {
+  let inT = 0, outT = 0, dur = 0;
+  const byTool = {};
+  for (const n of nodes) {
+    byTool[n.tool] = (byTool[n.tool]||0) + 1;
+    const t = n.tokens;
+    if (t) {
+      inT += (t.input||0) + (t.cache_read||0) + (t.cache_create||0) + (t.cache_write||0);
+      outT += (t.output||0);
+      dur += (t.duration_ms||0);
+    }
+  }
+  const firstTs = nodes[0]?.ts;
+  const lastTs = nodes[nodes.length-1]?.postTs || nodes[nodes.length-1]?.ts;
+  let span = 0;
+  if (firstTs && lastTs) {
+    const ms = new Date(lastTs).getTime() - new Date(firstTs).getTime();
+    if (ms > 0) span = ms;
+  }
+  return {
+    inT, outT, dur, span,
+    tools: Object.entries(byTool).map(([tool,count]) => ({ tool, count, tag: leafTagClass(tool) })),
+  };
+}
+
+function fmtDur(ms) {
+  if (!ms) return '';
+  if (ms < 1000) return ms + 'ms';
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(s < 10 ? 1 : 0) + 's';
+  const m = Math.floor(s / 60);
+  return `${m}m${Math.round(s % 60)}s`;
+}
+
+function resolveAgentSubtree(node, descMap, treeMap) {
+  if (!descMap || !treeMap) return null;
+  const desc = String(node.input?.description || '').trim();
+  if (!desc) return null;
+  const sid = descMap.get(desc);
+  return sid ? (treeMap.get(sid) || null) : null;
+}
+
 // ─── Token Index (binary search) ─────────────────────────────────────────
 function buildTokenIndex(entries, timeline) {
   const idx = new Map();
@@ -590,6 +676,94 @@ const ProcessNode = {
 };
 ProcessNode.components = { 'process-node': ProcessNode };
 
+// ─── Sub-agent Flow View ─────────────────────────────────────────────────
+const SubAgentFlowView = {
+  name: 'SubAgentFlowView',
+  props: {
+    subAgentSessions: Array,  // [{ id, info, tree }]
+    parentTree: Object,       // parent session root node (for matching Agent calls)
+    sessionTreeMap: Object,
+    sessionDescMap: Object,
+    onNavigate: Function,
+  },
+  setup(props) {
+    const items = computed(() => {
+      if (!props.subAgentSessions?.length) return [];
+
+      // Walk parent tree collecting Agent tool nodes indexed by description
+      const agentNodesByDesc = new Map();
+      function walk(node) {
+        if (node.tool === 'Agent') {
+          const desc = String(node.input?.description || '').trim();
+          if (desc && !agentNodesByDesc.has(desc)) agentNodesByDesc.set(desc, node);
+        }
+        for (const child of (node.children || [])) walk(child);
+      }
+      if (props.parentTree) walk(props.parentTree);
+
+      return props.subAgentSessions.map(sess => {
+        const desc = (sess.info?.agent_description || '').trim();
+        const agentNode = desc ? (agentNodesByDesc.get(desc) || null) : null;
+        const agentType = agentNode
+          ? String(agentNode.input?.agent || agentNode.input?.subagent_type || 'general-purpose')
+          : (sess.info?.agent_name || 'general-purpose');
+        const label = desc || sess.info?.title || '';
+        return { sess, agentNode, agentType, label };
+      });
+    });
+
+    const expanded = reactive(new Set());
+    function toggle(id) { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); }
+    function navigate(id, e) { e.stopPropagation(); if (props.onNavigate) props.onNavigate(id); }
+
+    return { items, expanded, toggle, navigate };
+  },
+  template: `
+    <div class="sa-view">
+      <div class="sa-view__lbl">&#x26A1; Sub-agent sessions</div>
+      <div class="bp-conn"></div>
+      <div class="bp-gateway"><span class="bp-gateway__inner">+</span></div>
+      <div class="sa-fork">
+        <div v-for="item in items" :key="item.sess.id" class="sa-branch">
+          <div class="sa-fork-arm"></div>
+          <!-- Agent call box -->
+          <div class="sa-agent-call">
+            <div class="sa-agent-call__icon">A</div>
+            <div class="sa-agent-call__body">
+              <div class="sa-agent-call__type">{{ item.agentType }}</div>
+              <div v-if="item.label" class="sa-agent-call__label" :title="item.label">{{ item.label }}</div>
+            </div>
+            <span v-if="item.sess.info?.is_active" class="n-agent__status n-agent__status--active" style="font-size:8px">LIVE</span>
+          </div>
+          <!-- Downward arrow to session card -->
+          <div class="sa-arrow"></div>
+          <!-- Spawned session card -->
+          <div :class="['sa-session', expanded.has(item.sess.id) ? 'sa-session--open' : '']">
+            <div class="sa-session__hdr" @click="toggle(item.sess.id)">
+              <div class="sa-session__icon">S</div>
+              <span class="sa-session__name">{{ item.sess.info?.agent_name || item.sess.info?.agent_description || 'Sub-agent' }}</span>
+              <span v-if="item.sess.info?.is_active" class="sess__live" style="font-size:8px;margin-left:4px">LIVE</span>
+              <button class="tm-card__nav" @click.stop="navigate(item.sess.id, $event)" title="Open session">&#x2197;</button>
+              <span class="sa-session__chev">{{ expanded.has(item.sess.id) ? '&#x25BC;' : '&#x25B6;' }}</span>
+            </div>
+            <div v-if="item.sess.info?.title" class="sa-session__title">{{ item.sess.info.title }}</div>
+            <div v-if="expanded.has(item.sess.id)" class="sa-session__body">
+              <template v-if="item.sess.tree && item.sess.tree.children?.length">
+                <process-node v-for="child in item.sess.tree.children" :key="child.id"
+                              :node="child" :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap" />
+              </template>
+              <div v-else style="padding:16px;font-size:11px;color:var(--text-3);text-align:center">No process entries</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="bp-conn"></div>
+      <div class="bp-gateway"><span class="bp-gateway__inner">+</span></div>
+    </div>
+  `
+};
+SubAgentFlowView.components = { 'process-node': ProcessNode };
+
 // ─── Team View ────────────────────────────────────────────────────────────
 const TeamView = {
   name: 'TeamView',
@@ -612,7 +786,7 @@ const TeamView = {
         <div v-for="s in teamSessions" :key="s.id"
              :class="['tm-card', expanded.has(s.id) ? 'tm-card--expanded' : '']">
           <div class="tm-card__hdr" @click="toggle(s.id)">
-            <span class="tm-card__agent">{{ s.info.agent_name }}</span>
+            <span class="tm-card__agent">{{ s.info.agent_name || s.info.agent_description || 'Sub-agent' }}</span>
             <span v-if="s.info.is_active" class="tm-card__live">LIVE</span>
             <span class="tm-card__stats">{{ s.info.event_count }}ev</span>
             <button class="tm-card__nav" @click="navigate(s.id, $event)" title="Open this session">&#x2197;</button>
@@ -633,9 +807,179 @@ const TeamView = {
 };
 TeamView.components = { 'process-node': ProcessNode };
 
+// ─── Step Lane (recursive stepped view) ──────────────────────────────────
+const StepLane = {
+  name: 'StepLane',
+  props: {
+    node: Object,
+    tokenIndex: Object,
+    sessionTreeMap: Object,
+    sessionDescMap: Object,
+    onNavigate: Function,
+    depth: { type: Number, default: 0 },
+    stepNumberPrefix: { type: String, default: '' },
+  },
+  setup(props) {
+    const steps = computed(() => groupIntoSteps(props.node));
+    const userOverrides = reactive({});
+    function toggle(key) { userOverrides[key] = !isOpen(key); }
+    function defaultOpen(stepKind) { return stepKind === 'orch' || stepKind === 'parallel'; }
+    function isOpen(key) {
+      if (key in userOverrides) return userOverrides[key];
+      const i = parseInt(key.replace(/^s/, ''), 10);
+      const s = steps.value[i];
+      return s ? defaultOpen(s.kind) : false;
+    }
+    function stepNum(i) { return props.stepNumberPrefix ? `${props.stepNumberPrefix}.${i+1}` : String(i+1); }
+    function navigate(id, e) { e?.stopPropagation?.(); if (props.onNavigate) props.onNavigate(id); }
+    function agentChildSession(node) { return resolveAgentSubtree(node, props.sessionDescMap, props.sessionTreeMap); }
+    function agentChildSessionId(node) {
+      if (!props.sessionDescMap) return null;
+      const desc = String(node.input?.description || '').trim();
+      return desc ? (props.sessionDescMap.get(desc) || null) : null;
+    }
+    function aggregate(nodes) { return aggregateStep(nodes); }
+    function getLabelFor(n) { return getLabel(n); }
+    function getDescFor(n) { return getDescription(n); }
+    function agentType(n) {
+      const i = n.input || {};
+      return i.agent || i.subagent_type || 'general-purpose';
+    }
+    return { steps, toggle, isOpen, stepNum, navigate, agentChildSession, agentChildSessionId,
+             aggregate, getLabelFor, getDescFor, agentType, fmtT, fmtK, fmtDur };
+  },
+  template: `
+    <div class="sl-lane">
+      <template v-for="(s, i) in steps" :key="i">
+        <div class="sl-conn" v-if="i > 0"></div>
+
+        <!-- ── SOLO step (User prompt, command, etc.) ── -->
+        <div v-if="s.kind==='solo'" class="sl-step sl-step--solo">
+          <div class="sl-step__num">{{ stepNum(i) }}</div>
+          <div class="sl-step__body">
+            <div class="sl-step__hdr">
+              <span class="sl-tag" :class="'ltag-'+s.nodes[0].tool.toLowerCase()">{{ s.nodes[0].tool }}</span>
+              <span class="sl-step__title">{{ getLabelFor(s.nodes[0]) || '—' }}</span>
+              <span class="sl-step__time">{{ fmtT(s.nodes[0].ts) }}</span>
+            </div>
+            <div v-if="getDescFor(s.nodes[0])" class="sl-step__desc">{{ getDescFor(s.nodes[0]) }}</div>
+          </div>
+        </div>
+
+        <!-- ── SEQ step (sequential tool calls) ── -->
+        <div v-else-if="s.kind==='seq'" class="sl-step sl-step--seq" :class="isOpen('s'+i) ? 'sl-step--open' : ''">
+          <div class="sl-step__num">{{ stepNum(i) }}</div>
+          <div class="sl-step__body">
+            <div class="sl-step__hdr" @click="toggle('s'+i)">
+              <span class="sl-step__kind">SEQUENTIAL</span>
+              <span class="sl-step__count">{{ s.nodes.length }} ops</span>
+              <div class="sl-chips">
+                <span v-for="t in aggregate(s.nodes).tools" :key="t.tool" :class="['sl-chip', t.tag]">
+                  {{ t.tool }}<span v-if="t.count>1"> ×{{ t.count }}</span>
+                </span>
+              </div>
+              <span class="sl-step__meta">
+                <span v-if="aggregate(s.nodes).span" class="sl-meta__dur">{{ fmtDur(aggregate(s.nodes).span) }}</span>
+                <span v-if="aggregate(s.nodes).inT" class="t-in">&uarr;{{ fmtK(aggregate(s.nodes).inT) }}</span>
+                <span v-if="aggregate(s.nodes).outT" class="t-out">&darr;{{ fmtK(aggregate(s.nodes).outT) }}</span>
+              </span>
+              <span class="sl-step__chev">{{ isOpen('s'+i) ? '▼' : '▶' }}</span>
+            </div>
+            <div v-if="isOpen('s'+i)" class="sl-step__detail">
+              <flow-node v-for="c in s.nodes" :key="c.id" :node="c" :token-index="tokenIndex"
+                         :depth="depth+1" :expanded-set="new Set(s.nodes.map(n=>n.id))" @toggle="()=>{}" />
+            </div>
+          </div>
+        </div>
+
+        <!-- ── ORCH step (single Agent or Skill) ── -->
+        <div v-else-if="s.kind==='orch'" class="sl-step sl-step--orch" :class="[s.nodes[0].tool==='Skill'?'sl-step--skill':'sl-step--agent', isOpen('s'+i)?'sl-step--open':'']">
+          <div class="sl-step__num">{{ stepNum(i) }}</div>
+          <div class="sl-step__body">
+            <div class="sl-step__hdr" @click="toggle('s'+i)">
+              <span class="sl-step__kind">{{ s.nodes[0].tool === 'Skill' ? 'SKILL' : 'SUB-AGENT' }}</span>
+              <span class="sl-step__title">{{ getLabelFor(s.nodes[0]) }}</span>
+              <span v-if="getDescFor(s.nodes[0])" class="sl-step__desc-inline">— {{ getDescFor(s.nodes[0]) }}</span>
+              <span class="sl-step__meta">
+                <span v-if="aggregate(s.nodes).span" class="sl-meta__dur">{{ fmtDur(aggregate(s.nodes).span) }}</span>
+                <span v-if="s.nodes[0].status==='active'" class="sl-live">● LIVE</span>
+              </span>
+              <span class="sl-step__chev">{{ isOpen('s'+i) ? '▼' : '▶' }}</span>
+            </div>
+            <div v-if="isOpen('s'+i)" class="sl-step__detail">
+              <template v-if="agentChildSession(s.nodes[0])">
+                <step-lane :node="agentChildSession(s.nodes[0])" :token-index="tokenIndex"
+                           :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap"
+                           :on-navigate="onNavigate" :depth="depth+1" :step-number-prefix="stepNum(i)" />
+              </template>
+              <template v-else-if="s.nodes[0].children?.length">
+                <step-lane :node="s.nodes[0]" :token-index="tokenIndex"
+                           :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap"
+                           :on-navigate="onNavigate" :depth="depth+1" :step-number-prefix="stepNum(i)" />
+              </template>
+              <div v-else class="sl-empty">No nested operations</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PARALLEL step (multiple sub-agents in parallel) ── -->
+        <div v-else-if="s.kind==='parallel'" class="sl-step sl-step--parallel" :class="isOpen('s'+i)?'sl-step--open':''">
+          <div class="sl-step__num">{{ stepNum(i) }}</div>
+          <div class="sl-step__body">
+            <div class="sl-step__hdr" @click="toggle('s'+i)">
+              <span class="sl-step__kind">PARALLEL</span>
+              <span class="sl-step__title">Launch {{ s.nodes.length }} sub-agents in parallel</span>
+              <div class="sl-agent-pills">
+                <span v-for="n in s.nodes" :key="n.id" class="sl-agent-pill">{{ agentType(n) }}</span>
+              </div>
+              <span class="sl-step__meta">
+                <span v-if="aggregate(s.nodes).span" class="sl-meta__dur">{{ fmtDur(aggregate(s.nodes).span) }}</span>
+              </span>
+              <span class="sl-step__chev">{{ isOpen('s'+i) ? '▼' : '▶' }}</span>
+            </div>
+            <div v-if="isOpen('s'+i)" class="sl-step__detail sl-step__detail--bpmn">
+              <div class="sl-bpmn-conn"></div>
+              <div class="sl-bpmn-gateway"><span class="sl-bpmn-gateway__inner">+</span></div>
+              <div class="sl-bpmn-conn"></div>
+              <div class="sl-cols">
+                <div v-for="(n, ni) in s.nodes" :key="n.id" class="sl-col">
+                  <div class="sl-col__hdr">
+                    <span class="sl-col__type">{{ agentType(n) }}</span>
+                    <button v-if="agentChildSessionId(n)"
+                            class="sl-col__nav" @click="navigate(agentChildSessionId(n), $event)"
+                            title="Open this sub-agent's session">↗</button>
+                  </div>
+                  <div v-if="getLabelFor(n)" class="sl-col__label" :title="getLabelFor(n)">{{ getLabelFor(n) }}</div>
+                  <div v-if="getDescFor(n)" class="sl-col__desc">{{ getDescFor(n) }}</div>
+                  <div class="sl-col__lane">
+                    <step-lane v-if="agentChildSession(n)"
+                               :node="agentChildSession(n)" :token-index="tokenIndex"
+                               :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap"
+                               :on-navigate="onNavigate" :depth="depth+1" :step-number-prefix="stepNum(i)+'.'+(ni+1)" />
+                    <step-lane v-else-if="n.children?.length"
+                               :node="n" :token-index="tokenIndex"
+                               :session-tree-map="sessionTreeMap" :session-desc-map="sessionDescMap"
+                               :on-navigate="onNavigate" :depth="depth+1" :step-number-prefix="stepNum(i)+'.'+(ni+1)" />
+                    <div v-else class="sl-empty">No nested operations yet</div>
+                  </div>
+                  <div v-if="n.status==='active'" class="sl-col__live">● LIVE</div>
+                </div>
+              </div>
+              <div class="sl-bpmn-conn"></div>
+              <div class="sl-bpmn-gateway"><span class="sl-bpmn-gateway__inner">+</span></div>
+            </div>
+          </div>
+        </div>
+      </template>
+      <div v-if="!steps.length" class="sl-empty">No steps</div>
+    </div>
+  `
+};
+StepLane.components = { 'flow-node': FlowNode, 'step-lane': StepLane };
+
 // ─── Main App ────────────────────────────────────────────────────────────
 const app = createApp({
-  components: { 'flow-node': FlowNode, 'process-node': ProcessNode, 'team-view': TeamView },
+  components: { 'flow-node': FlowNode, 'process-node': ProcessNode, 'team-view': TeamView, 'sub-agent-flow': SubAgentFlowView, 'step-lane': StepLane },
   setup() {
     const sidebarWidth = ref(280);
     const sidebarDragging = ref(false);
@@ -692,7 +1036,7 @@ const app = createApp({
     const stats = ref(null);
     const liveConnected = ref(true);
     const reloading = ref(false);
-    const tab = ref('tree');
+    const tab = ref('flow');
     const autoScroll = ref(true);
     const sessionSearch = ref('');
     const eventSearch = ref('');
@@ -711,6 +1055,46 @@ const app = createApp({
     const rawPanelWidth = ref(420);
     const rawDragging = ref(false);
     const openRawLines = reactive({});
+
+    // ── Settings state ───────────────────────────────────────────────────────
+    const settingsOpen = ref(false);
+    const settingsDraft = ref({ projectsDir: '', teamsDir: '' });
+    const settingsSaved = ref({ projectsDir: '', teamsDir: '' });
+    const settingsChanged = computed(() =>
+      settingsDraft.value.projectsDir !== settingsSaved.value.projectsDir ||
+      settingsDraft.value.teamsDir !== settingsSaved.value.teamsDir
+    );
+
+    const pathWarnings = ref([]);
+
+    async function loadSettings() {
+      try {
+        const s = await window.electronAPI.getSettings();
+        settingsDraft.value = { ...s };
+        settingsSaved.value = { ...s };
+      } catch(e) { console.error('[Settings] load failed:', e); }
+    }
+
+    async function checkPaths() {
+      try {
+        const ok = await window.electronAPI.checkSettings();
+        const warns = [];
+        if (!ok.projectsDir) warns.push({ key: 'projectsDir', label: 'Projects folder' });
+        if (!ok.teamsDir) warns.push({ key: 'teamsDir', label: 'Teams folder' });
+        pathWarnings.value = warns;
+      } catch(e) { /* ignore */ }
+    }
+
+    async function browseFolder(key) {
+      const folder = await window.electronAPI.selectFolder();
+      if (folder) settingsDraft.value = { ...settingsDraft.value, [key]: folder };
+    }
+
+    async function saveSettings() {
+      await window.electronAPI.setSettings({ ...settingsDraft.value });
+      settingsSaved.value = { ...settingsDraft.value };
+      await checkPaths();
+    }
 
     // ── Teams state ──────────────────────────────────────────────────────────
     const teams = ref([]);
@@ -833,6 +1217,8 @@ const app = createApp({
 
       // Per-category token totals from timeline
       const cats = {};
+      const skillMap = {};   // skill name → token buckets
+      const agentMap = {};   // agent type → token buckets
       for (const entry of (stats.value.timeline || [])) {
         const cat = classifyTurnTools(entry.tools);
         if (!cats[cat]) cats[cat] = { input: 0, output: 0, cache_read: 0, cache_create: 0 };
@@ -840,6 +1226,21 @@ const app = createApp({
         cats[cat].output += entry.output || 0;
         cats[cat].cache_read += entry.cache_read || 0;
         cats[cat].cache_create += entry.cache_create || 0;
+
+        for (const skill of (entry.skills || [])) {
+          if (!skillMap[skill]) skillMap[skill] = { input: 0, output: 0, cache_read: 0, cache_create: 0 };
+          skillMap[skill].input += entry.input || 0;
+          skillMap[skill].output += entry.output || 0;
+          skillMap[skill].cache_read += entry.cache_read || 0;
+          skillMap[skill].cache_create += entry.cache_create || 0;
+        }
+        for (const agent of (entry.agents || [])) {
+          if (!agentMap[agent]) agentMap[agent] = { input: 0, output: 0, cache_read: 0, cache_create: 0 };
+          agentMap[agent].input += entry.input || 0;
+          agentMap[agent].output += entry.output || 0;
+          agentMap[agent].cache_read += entry.cache_read || 0;
+          agentMap[agent].cache_create += entry.cache_create || 0;
+        }
       }
       const catList = Object.entries(cats).map(([name, c]) => ({
         name,
@@ -849,12 +1250,29 @@ const app = createApp({
       })).sort((a, b) => b.total - a.total);
       const maxCatTotal = catList[0]?.total || 1;
 
+      const skillList = Object.entries(skillMap).map(([name, c]) => ({
+        name,
+        total: c.input + c.output + c.cache_read + c.cache_create,
+        cost: c.input * TOKEN_PRICES.input + c.output * TOKEN_PRICES.output
+            + c.cache_create * TOKEN_PRICES.cache_create + c.cache_read * TOKEN_PRICES.cache_read,
+      })).sort((a, b) => b.total - a.total);
+
+      const agentList = Object.entries(agentMap).map(([name, c]) => ({
+        name,
+        total: c.input + c.output + c.cache_read + c.cache_create,
+        cost: c.input * TOKEN_PRICES.input + c.output * TOKEN_PRICES.output
+            + c.cache_create * TOKEN_PRICES.cache_create + c.cache_read * TOKEN_PRICES.cache_read,
+      })).sort((a, b) => b.total - a.total);
+      const maxDelegTotal = [...skillList, ...agentList].reduce((m, x) => Math.max(m, x.total), 1);
+
       // Tool call counts
       const toolList = Object.entries(stats.value.tools || {})
         .sort((a, b) => b[1] - a[1]).slice(0, 12);
       const maxToolCalls = toolList[0]?.[1] || 1;
 
-      return { tokens: t, total, cost, cacheHitRate, catList, maxCatTotal, toolList, maxToolCalls };
+      const agentRole = stats.value.agentRole || '';
+
+      return { tokens: t, total, cost, cacheHitRate, catList, maxCatTotal, skillList, agentList, maxDelegTotal, toolList, maxToolCalls, agentRole };
     });
     // ── End Token analytics ───────────────────────────────────────────────────
 
@@ -898,6 +1316,20 @@ const app = createApp({
           tree: childSessionTreeMap.value.get(id) || null,
         }))
         .filter(s => s.info?.agent_name)
+        .sort((a, b) => (a.info.first_ts || '').localeCompare(b.info.first_ts || ''));
+    });
+
+    const subAgentSessions = computed(() => {
+      if (isTeamLead.value) return [];
+      const info = sessionMap.value.get(activeSession.value);
+      if (!info?.child_ids?.length) return [];
+      return info.child_ids
+        .map(id => ({
+          id,
+          info: sessionMap.value.get(id),
+          tree: childSessionTreeMap.value.get(id) || null,
+        }))
+        .filter(s => s.info)
         .sort((a, b) => (a.info.first_ts || '').localeCompare(b.info.first_ts || ''));
     });
 
@@ -1235,7 +1667,7 @@ const app = createApp({
         case '/': e.preventDefault(); searchInput.value?.focus(); break;
         case 'e': tab.value='events'; break;
         case 't': tab.value='tree'; break;
-        case 'p': tab.value='process'; break;
+        case 'p': tab.value='flow'; break;
         case 'm': tab.value='teams'; break;
         case 'k': tab.value='tokens'; break;
         case 'j': case 'ArrowDown': { e.preventDefault(); const items=[...document.querySelectorAll('.sess')]; const cur=items.findIndex(el=>el.classList.contains('sess--active')); if (items[cur+1]) items[cur+1].click(); break; }
@@ -1253,6 +1685,8 @@ const app = createApp({
     let pollTimer = null;
 
     onMounted(async ()=>{
+      await loadSettings();
+      await checkPaths();
       await loadSessions();
       await loadTeams();
       connectGlobalStream();
@@ -1286,14 +1720,16 @@ const app = createApp({
              startRawResize, toggleRawLine,
              sessionTitle,
              childSessionTreeMap, childSessionDescMap,
-             isTeamLead, teamMemberSessions,
+             isTeamLead, teamMemberSessions, subAgentSessions,
              teams, activeTeam, teamMessages, teamsCollapsed,
              activeTeamData, agentMessageGroups, loadTeams, selectTeam,
              teamArchiving, archiveCurrentTeam,
              revokedTeamPending, revokedArchiving,
              handleRevokedClose, handleRevokedArchive,
              tokenStats, fmtCost, fmtCostSmall,
-             resolvePostTool };
+             resolvePostTool,
+             settingsOpen, settingsDraft, settingsChanged, browseFolder, saveSettings,
+             pathWarnings };
   }
 });
 app.mount('#app');

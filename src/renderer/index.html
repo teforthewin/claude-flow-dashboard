@@ -98,6 +98,28 @@ input, select { font-family: inherit; }
 .topbar__refresh:hover { color: var(--agent); border-color: var(--agent); background: var(--agent-bg); }
 .topbar__refresh--spinning { animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.topbar__settings {
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text-3); font-size: 14px; cursor: pointer;
+  padding: 2px 7px; line-height: 1; transition: all .15s;
+}
+.topbar__settings:hover { color: var(--agent); border-color: var(--agent); background: var(--agent-bg); }
+
+/* Path warning banner */
+.path-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 16px; background: #fffbeb; border-bottom: 1px solid #fde68a;
+  flex-shrink: 0; z-index: 10;
+}
+.path-banner__icon { font-size: 13px; color: #b45309; flex-shrink: 0; }
+.path-banner__text { font-size: 11px; color: #92400e; flex: 1; }
+.path-banner__text strong { font-weight: 700; }
+.path-banner__btn {
+  background: #b45309; color: #fff; border: none; border-radius: 5px;
+  font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer;
+  flex-shrink: 0; transition: opacity .15s;
+}
+.path-banner__btn:hover { opacity: .85; }
 
 .main { display: flex; flex: 1; overflow: hidden; }
 
@@ -615,6 +637,130 @@ input, select { font-family: inherit; }
 .sidebar__selbar-btn--archive:hover { background: var(--skill-bg); }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   Stepped Lane View
+   ══════════════════════════════════════════════════════════════════════════ */
+.sl-wrap { flex: 1; overflow: auto; padding: 18px 24px 32px; background: var(--bg); }
+.sl-frame { display: flex; flex-direction: column; align-items: stretch; }
+.sl-frame > .sl-bpmn-event { align-self: center; }
+.sl-frame > .sl-bpmn-conn  { align-self: center; }
+.sl-lane { display: flex; flex-direction: column; gap: 0; }
+.sl-conn { width: 2px; height: 14px; background: var(--border-2); margin: 0 0 0 18px; flex-shrink: 0; }
+
+/* BPMN-style markers reused inside the unified Flow view */
+.sl-bpmn-event {
+  width: 28px; height: 28px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
+  flex-shrink: 0;
+}
+.sl-bpmn-event--start { border: 2px solid var(--green); color: var(--green); }
+.sl-bpmn-event--end   { border: 3px solid var(--text-3); color: var(--text-3); }
+.sl-bpmn-conn { width: 2px; height: 14px; background: var(--border-2); flex-shrink: 0; align-self: center; }
+.sl-bpmn-gateway {
+  width: 22px; height: 22px; transform: rotate(45deg);
+  border: 2px solid var(--agent); background: var(--bg-white);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; align-self: center; margin: 2px 0;
+}
+.sl-bpmn-gateway__inner { transform: rotate(-45deg); font-size: 9px; font-weight: 700; color: var(--agent); }
+.sl-step__detail--bpmn { display: flex; flex-direction: column; align-items: stretch; }
+.sl-step__detail--bpmn > .sl-bpmn-conn,
+.sl-step__detail--bpmn > .sl-bpmn-gateway { align-self: center; }
+.sl-step {
+  display: flex; gap: 10px; align-items: stretch;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sl-step:hover { border-color: var(--border-2); }
+.sl-step--open { box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+.sl-step__num {
+  flex-shrink: 0; width: 38px; padding: 8px 0;
+  font: 600 11px ui-monospace, monospace; color: var(--text-3);
+  text-align: center; border-right: 1px solid var(--border);
+  background: var(--bg-hover); border-radius: 8px 0 0 8px;
+}
+.sl-step__body { flex: 1; min-width: 0; padding: 8px 12px; }
+.sl-step__hdr {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 12px; min-height: 22px;
+}
+.sl-step__kind {
+  font: 700 9px ui-monospace, monospace; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
+  background: var(--bg-hover); color: var(--text-2);
+}
+.sl-step--seq      .sl-step__kind { background: #f1f5f9; color: #475569; }
+.sl-step--parallel .sl-step__kind { background: #fef3c7; color: #92400e; }
+.sl-step--agent    .sl-step__kind { background: var(--agent-bg); color: var(--agent); }
+.sl-step--skill    .sl-step__kind { background: var(--skill-bg); color: var(--skill); }
+.sl-step--solo     .sl-step__kind { background: #eff6ff; color: #1d4ed8; }
+.sl-step__count { font: 600 11px ui-monospace, monospace; color: var(--text-2); flex-shrink: 0; }
+.sl-step__title { font-weight: 600; color: #0f172a; flex-shrink: 0; }
+.sl-step__desc-inline {
+  font-size: 11px; color: var(--text-2); flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sl-step__desc { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+.sl-step__time { font: 600 10px ui-monospace, monospace; color: var(--text-3); margin-left: auto; }
+.sl-step__meta {
+  display: flex; gap: 8px; align-items: center;
+  font: 600 10px ui-monospace, monospace; color: var(--text-3);
+  margin-left: auto; flex-shrink: 0;
+}
+.sl-meta__dur { color: var(--text-2); }
+.sl-step__meta .t-in  { color: #2563eb; }
+.sl-step__meta .t-out { color: #16a34a; }
+.sl-step__chev { font-size: 9px; color: var(--text-3); flex-shrink: 0; width: 12px; text-align: center; }
+.sl-live { color: var(--green); font-weight: 700; animation: pulse 1.6s ease-in-out infinite; }
+
+.sl-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.sl-chip {
+  font: 600 10px ui-monospace, monospace; padding: 1px 6px; border-radius: 3px;
+  background: var(--bg-hover); color: var(--text-2); flex-shrink: 0;
+}
+.sl-agent-pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.sl-agent-pill {
+  font: 600 10px ui-monospace, monospace; padding: 2px 7px; border-radius: 10px;
+  background: var(--agent-bg); color: var(--agent); border: 1px solid var(--agent-bdr);
+}
+.sl-tag {
+  font: 700 9px ui-monospace, monospace; padding: 2px 6px; border-radius: 3px;
+  background: #eff6ff; color: #1d4ed8; flex-shrink: 0;
+}
+
+.sl-step__detail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.sl-step__detail .n-leaf,
+.sl-step__detail > * { margin-bottom: 4px; }
+.sl-empty { padding: 10px; font-size: 11px; color: var(--text-3); text-align: center; }
+
+.sl-cols {
+  display: flex; gap: 12px; overflow-x: auto;
+  padding: 4px 2px; align-items: flex-start;
+}
+.sl-col {
+  flex: 1 1 280px; min-width: 240px; max-width: 100%;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  padding: 10px; display: flex; flex-direction: column; gap: 6px;
+}
+.sl-col__hdr { display: flex; align-items: center; gap: 6px; }
+.sl-col__type {
+  font: 700 10px ui-monospace, monospace; letter-spacing: .04em;
+  padding: 2px 7px; border-radius: 10px; color: var(--agent);
+  background: var(--agent-bg); border: 1px solid var(--agent-bdr);
+}
+.sl-col__nav {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  font-size: 12px; color: var(--text-3); padding: 2px 4px;
+}
+.sl-col__nav:hover { color: var(--agent); }
+.sl-col__label {
+  font-weight: 600; font-size: 11px; color: #0f172a;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sl-col__desc { font-size: 10px; color: var(--text-2); line-height: 1.35; }
+.sl-col__lane { margin-top: 4px; }
+.sl-col__live { font: 700 9px ui-monospace, monospace; color: var(--green); align-self: flex-start; }
+
+/* ══════════════════════════════════════════════════════════════════════════
    BPMN / Process View
    ══════════════════════════════════════════════════════════════════════════ */
 .bp-wrap { flex: 1; overflow: auto; padding: 24px 32px; background: var(--bg); }
@@ -746,6 +892,98 @@ input, select { font-family: inherit; }
   font-size: 9px; background: #ede9fe; color: #6d28d9; border-radius: 3px;
   padding: 2px 6px; font-family: var(--font-mono); font-weight: 500;
   white-space: nowrap;
+}
+
+/* ── Sub-agent flow view ─────────────────────────────────────────────────── */
+.sa-view { width: 100%; display: flex; flex-direction: column; align-items: center; }
+.sa-view__lbl {
+  font-size: 10px; font-weight: 700; color: var(--agent); text-transform: uppercase;
+  letter-spacing: .07em; padding: 10px 0 0; opacity: .8;
+}
+
+/* Forked branches layout */
+.sa-fork {
+  display: flex; gap: 20px; align-items: flex-start; justify-content: center;
+  position: relative; padding: 0 8px;
+}
+.sa-fork::before {
+  content: ''; position: absolute; top: 0;
+  left: 50%; right: 50%;
+  height: 2px; background: var(--border-2);
+  /* overridden inline via CSS custom property */
+}
+.sa-branch {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 180px; max-width: 320px; flex: 1 1 180px;
+}
+.sa-fork-arm { width: 2px; height: 14px; background: var(--border-2); }
+
+/* Agent call node */
+.sa-agent-call {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 6px;
+  border: 1.5px solid var(--agent-bdr); background: var(--agent-bg);
+  width: 100%; font-size: 11px; box-sizing: border-box;
+}
+.sa-agent-call__icon {
+  width: 22px; height: 22px; border-radius: 5px; background: var(--agent);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.sa-agent-call__body { flex: 1; min-width: 0; }
+.sa-agent-call__type {
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--agent);
+}
+.sa-agent-call__label {
+  font-size: 10px; color: var(--text-2); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono);
+  margin-top: 1px;
+}
+
+/* Arrow connector between agent call and session card */
+.sa-arrow {
+  width: 2px; height: 22px; background: var(--agent-bdr); flex-shrink: 0;
+  position: relative;
+}
+.sa-arrow::after {
+  content: '▼'; position: absolute; bottom: -7px; left: 50%;
+  transform: translateX(-50%); font-size: 8px; color: var(--agent-bdr); line-height: 1;
+}
+
+/* Spawned session card */
+.sa-session {
+  border: 1.5px solid var(--agent-bdr); border-radius: 8px;
+  background: var(--bg-white); width: 100%; overflow: hidden;
+  margin-top: 8px; transition: box-shadow .12s, border-color .12s;
+}
+.sa-session:hover { border-color: var(--agent); box-shadow: 0 2px 10px rgba(37,99,235,.1); }
+.sa-session--open { border-color: var(--agent); }
+.sa-session__hdr {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px; background: var(--agent-bg);
+  border-bottom: 1px solid var(--agent-bdr); cursor: pointer; user-select: none;
+}
+.sa-session__hdr:hover { background: #dbeafe; }
+.sa-session__icon {
+  width: 18px; height: 18px; border-radius: 4px; background: var(--agent);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; flex-shrink: 0;
+}
+.sa-session__name {
+  font-size: 11px; font-weight: 700; color: var(--agent);
+  font-family: var(--font-mono); flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sa-session__chev { font-size: 9px; color: var(--agent); flex-shrink: 0; }
+.sa-session__title {
+  font-size: 10px; color: var(--text-2); padding: 4px 10px;
+  border-bottom: 1px solid var(--agent-bdr); font-style: italic;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sa-session__body {
+  padding: 8px 4px 4px; overflow-x: auto;
+  display: flex; flex-direction: column; align-items: center;
 }
 
 /* ── Team member cards ───────────────────────────────────────────────────── */
@@ -949,6 +1187,13 @@ input, select { font-family: inherit; }
 
 /* ── Tokens panel ─────────────────────────────────────────────────────────── */
 .tok-wrap { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.tok-role-badge {
+  display: flex; align-items: center; gap: 6px; font-size: 11px;
+  background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 6px;
+  padding: 6px 12px; color: #5b21b6;
+}
+.tok-role-badge__icon { font-size: 13px; }
+.tok-role-badge strong { font-family: var(--font-mono); font-size: 11px; }
 .tok-summary {
   display: flex; gap: 10px; flex-wrap: wrap;
 }
@@ -973,6 +1218,8 @@ input, select { font-family: inherit; }
 .tok-bar--cread  { background: #f59e0b; }
 .tok-bar--cwrite { background: #f97316; }
 .tok-bar--cat    { background: #8b5cf6; }
+.tok-bar--skill  { background: #7c3aed; }
+.tok-bar--agent  { background: #2563eb; }
 .tok-bar--tool   { background: #64748b; }
 .tok-row__pct { width: 32px; text-align: right; color: var(--text-3); font-size: 10px; flex-shrink: 0; }
 .tok-row__num { width: 48px; text-align: right; font-family: var(--font-mono); font-size: 10px; color: var(--text-2); flex-shrink: 0; }
@@ -984,6 +1231,53 @@ input, select { font-family: inherit; }
 }
 .team-archive-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .team-archive-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Settings Modal */
+.settings-modal {
+  background: var(--bg-white); border-radius: 12px; padding: 0;
+  max-width: 520px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.settings-modal__hdr {
+  display: flex; align-items: center; padding: 16px 20px;
+  border-bottom: 1px solid var(--border); gap: 10px;
+}
+.settings-modal__title { font-size: 15px; font-weight: 700; color: var(--text); flex: 1; }
+.settings-modal__close {
+  background: none; border: none; font-size: 14px; color: var(--text-3);
+  cursor: pointer; padding: 2px 6px; border-radius: 4px;
+}
+.settings-modal__close:hover { background: var(--bg-hover); color: var(--text); }
+.settings-modal__body { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+.settings-field { display: flex; flex-direction: column; gap: 6px; }
+.settings-label { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.settings-input-row { display: flex; gap: 8px; }
+.settings-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: 11px; font-family: var(--font-mono);
+  padding: 7px 10px; outline: none; min-width: 0;
+}
+.settings-browse {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11px; font-weight: 600; color: var(--text-2); padding: 6px 12px;
+  cursor: pointer; transition: all .15s; flex-shrink: 0;
+}
+.settings-browse:hover { background: var(--agent-bg); border-color: var(--agent); color: var(--agent); }
+.settings-hint { font-size: 10px; color: var(--text-3); }
+.settings-modal__footer {
+  display: flex; align-items: center; gap: 10px; padding: 14px 20px;
+  border-top: 1px solid var(--border); background: var(--bg);
+}
+.settings-restart-note { font-size: 10px; color: #ca8a04; flex: 1; }
+.settings-btn {
+  padding: 7px 16px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: none; transition: opacity .15s;
+}
+.settings-btn:disabled { opacity: .4; cursor: not-allowed; }
+.settings-btn--cancel { background: var(--bg-hover); color: var(--text-2); border: 1px solid var(--border); }
+.settings-btn--cancel:hover { background: var(--border); }
+.settings-btn--save { background: var(--agent); color: #fff; }
+.settings-btn--save:hover:not(:disabled) { opacity: .85; }
 
 /* Team Revocation Modal */
 .revoke-overlay {
@@ -1024,7 +1318,19 @@ input, select { font-family: inherit; }
       <div :class="['topbar__dot', liveConnected ? 'topbar__dot--on' : 'topbar__dot--off']"></div>
       {{ liveConnected ? 'LIVE' : 'OFF' }}
     </div>
+    <button class="topbar__settings" @click="settingsOpen = true" title="Settings">&#9881;</button>
   </header>
+
+  <!-- Path warning banner -->
+  <div v-if="pathWarnings.length" class="path-banner">
+    <span class="path-banner__icon">⚠</span>
+    <span class="path-banner__text">
+      Folder{{ pathWarnings.length > 1 ? 's' : '' }} not found:
+      <strong v-for="(w, i) in pathWarnings" :key="w.key">{{ w.label }}<span v-if="i &lt; pathWarnings.length - 1">, </span></strong>.
+      Check your paths in Settings.
+    </span>
+    <button class="path-banner__btn" @click="settingsOpen = true">Open Settings</button>
+  </div>
 
   <!-- ═══ Main ═══════════════════════════════════════════════════════════ -->
   <div class="main">
@@ -1164,11 +1470,11 @@ input, select { font-family: inherit; }
 
       <!-- Tab bar -->
       <div class="tabs">
-        <button :class="['tab', tab==='tree' ? 'tab--active' : '']" @click="tab='tree'">
-          Flow Tree<span class="tab__count" v-if="entries.length">({{ entries.length }})</span>
+        <button :class="['tab', tab==='flow' ? 'tab--active' : '']" @click="tab='flow'">
+          Flow
         </button>
-        <button :class="['tab', tab==='process' ? 'tab--active' : '']" @click="tab='process'">
-          Process
+        <button :class="['tab', tab==='tree' ? 'tab--active' : '']" @click="tab='tree'">
+          Tree<span class="tab__count" v-if="entries.length">({{ entries.length }})</span>
         </button>
         <button :class="['tab', tab==='events' ? 'tab--active' : '']" @click="tab='events'">
           Events<span class="tab__count" v-if="entries.length">({{ filteredEvents.length }})</span>
@@ -1208,24 +1514,26 @@ input, select { font-family: inherit; }
         </template>
       </div>
 
-      <!-- Process / BPMN view -->
-      <div v-show="tab==='process'" class="bp-wrap">
+      <!-- Unified Flow view (BPMN + numbered steps) -->
+      <div v-show="tab==='flow'" class="sl-wrap">
         <div v-if="!activeSession" class="empty">Select a session from the sidebar</div>
         <div v-else-if="!tree" class="empty">Loading...</div>
-        <div v-else class="bp-flow">
-          <div class="bp-event bp-event--start">&#x25B6;</div>
-          <process-node v-for="child in tree.children" :key="child.id" :node="child"
-                        :session-tree-map="isTeamLead ? new Map() : childSessionTreeMap"
-                        :session-desc-map="isTeamLead ? new Map() : childSessionDescMap"></process-node>
+        <div v-else class="sl-frame">
+          <div class="sl-bpmn-event sl-bpmn-event--start">&#x25B6;</div>
+          <div class="sl-bpmn-conn"></div>
+          <step-lane :node="tree" :token-index="tokenIndex"
+                     :session-tree-map="childSessionTreeMap"
+                     :session-desc-map="childSessionDescMap"
+                     :on-navigate="selectSession" :depth="0"></step-lane>
           <template v-if="isTeamLead && teamMemberSessions.length">
-            <div class="bp-conn"></div>
+            <div class="sl-bpmn-conn"></div>
             <team-view :team-sessions="teamMemberSessions"
                        :session-tree-map="childSessionTreeMap"
                        :session-desc-map="childSessionDescMap"
                        :on-navigate="selectSession"></team-view>
           </template>
-          <div class="bp-conn"></div>
-          <div class="bp-event bp-event--end">&#x25A0;</div>
+          <div class="sl-bpmn-conn"></div>
+          <div class="sl-bpmn-event sl-bpmn-event--end">&#x25A0;</div>
         </div>
       </div>
 
@@ -1335,6 +1643,12 @@ input, select { font-family: inherit; }
         <div v-else-if="!tokenStats" class="empty">No token data for this session</div>
         <template v-else>
 
+          <!-- Agent role badge (for spawned team agents) -->
+          <div v-if="tokenStats.agentRole" class="tok-role-badge">
+            <span class="tok-role-badge__icon">⚙</span>
+            Agent role: <strong>{{ tokenStats.agentRole }}</strong>
+          </div>
+
           <!-- Summary pills -->
           <div class="tok-summary">
             <div class="tok-summary__pill">
@@ -1396,6 +1710,28 @@ input, select { font-family: inherit; }
             </div>
           </div>
 
+          <!-- Skills breakdown -->
+          <div class="tok-section" v-if="tokenStats.skillList.length">
+            <div class="tok-section__hdr">Skills</div>
+            <div v-for="item in tokenStats.skillList" :key="item.name" class="tok-row">
+              <span class="tok-row__lbl tok-row__lbl--mono">{{ item.name }}</span>
+              <div class="tok-row__track"><div class="tok-row__bar tok-bar--skill" :style="{ width: (item.total / tokenStats.maxDelegTotal * 100) + '%' }"></div></div>
+              <span class="tok-row__num">{{ fmtK(item.total) }}</span>
+              <span class="tok-row__cost">{{ fmtCostSmall(item.cost) }}</span>
+            </div>
+          </div>
+
+          <!-- Agents breakdown -->
+          <div class="tok-section" v-if="tokenStats.agentList.length">
+            <div class="tok-section__hdr">Agents</div>
+            <div v-for="item in tokenStats.agentList" :key="item.name" class="tok-row">
+              <span class="tok-row__lbl tok-row__lbl--mono">{{ item.name }}</span>
+              <div class="tok-row__track"><div class="tok-row__bar tok-bar--agent" :style="{ width: (item.total / tokenStats.maxDelegTotal * 100) + '%' }"></div></div>
+              <span class="tok-row__num">{{ fmtK(item.total) }}</span>
+              <span class="tok-row__cost">{{ fmtCostSmall(item.cost) }}</span>
+            </div>
+          </div>
+
           <!-- Tool call counts -->
           <div class="tok-section" v-if="tokenStats.toolList.length">
             <div class="tok-section__hdr">Tool calls</div>
@@ -1440,6 +1776,39 @@ input, select { font-family: inherit; }
   </div>
 
   <div class="kb-hint">j/k navigate &middot; space expand &middot; t/p/e/m/k tabs &middot; / search &middot; esc collapse</div>
+
+  <!-- Settings Modal -->
+  <div v-if="settingsOpen" class="revoke-overlay" @click.self="settingsOpen = false">
+    <div class="settings-modal">
+      <div class="settings-modal__hdr">
+        <span class="settings-modal__title">Settings</span>
+        <button class="settings-modal__close" @click="settingsOpen = false">&#10005;</button>
+      </div>
+      <div class="settings-modal__body">
+        <div class="settings-field">
+          <label class="settings-label">Claude Projects Folder</label>
+          <div class="settings-input-row">
+            <input class="settings-input" :value="settingsDraft.projectsDir" readonly />
+            <button class="settings-browse" @click="browseFolder('projectsDir')">Browse</button>
+          </div>
+          <div class="settings-hint">Where Claude Code writes session logs (default: ~/.claude/projects)</div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">Claude Teams Folder</label>
+          <div class="settings-input-row">
+            <input class="settings-input" :value="settingsDraft.teamsDir" readonly />
+            <button class="settings-browse" @click="browseFolder('teamsDir')">Browse</button>
+          </div>
+          <div class="settings-hint">Where Claude Code stores team sessions (default: ~/.claude/teams)</div>
+        </div>
+      </div>
+      <div class="settings-modal__footer">
+        <div class="settings-restart-note" v-if="settingsChanged">Restart the app to apply changes.</div>
+        <button class="settings-btn settings-btn--cancel" @click="settingsOpen = false">Close</button>
+        <button class="settings-btn settings-btn--save" :disabled="!settingsChanged" @click="saveSettings">Save</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Team Revocation Modal -->
   <div v-if="revokedTeamPending" class="revoke-overlay">
