@@ -1,6 +1,6 @@
 {
   "name": "claude-flow-dashboard",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Claude Code session visualizer",
   "main": "out/main/index.js",
   "scripts": {
@@ -38,14 +38,19 @@
     "files": [
       "out/**/*"
     ],
+    "extraResources": [
+      { "from": "build/icon.png", "to": "icon.png" }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
       "target": [
         { "target": "dmg", "arch": ["arm64", "x64"] },
         { "target": "zip", "arch": ["arm64", "x64"] }
       ]
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
@@ -58,6 +63,7 @@
     },
     "linux": {
       "category": "Development",
+      "icon": "build/icon.png",
       "target": [
         { "target": "AppImage", "arch": ["x64"] },
         { "target": "deb", "arch": ["x64"] }

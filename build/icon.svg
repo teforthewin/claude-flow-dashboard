@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="0" dy="4" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.25"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+
+  <!-- Flow connectors (parent → children → grandchild) -->
+  <g stroke="#ffffff" stroke-width="38" fill="none" stroke-linecap="round" opacity="0.95">
+    <path d="M 512 320 Q 360 470 308 644"/>
+    <path d="M 512 320 Q 664 470 716 644"/>
+    <path d="M 308 720 Q 380 800 480 800"/>
+    <path d="M 716 720 Q 644 800 544 800"/>
+  </g>
+
+  <!-- Nodes -->
+  <g filter="url(#shadow)">
+    <circle cx="512" cy="280" r="108" fill="#ffffff"/>
+    <circle cx="280" cy="680" r="84"  fill="#ffffff"/>
+    <circle cx="744" cy="680" r="84"  fill="#ffffff"/>
+    <circle cx="512" cy="840" r="56"  fill="#ffffff"/>
+  </g>
+
+  <!-- Inner accent on parent node -->
+  <circle cx="512" cy="280" r="46" fill="#1d4ed8"/>
+</svg>
