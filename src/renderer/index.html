@@ -637,6 +637,33 @@ input, select { font-family: inherit; }
 .sidebar__selbar-btn--archive:hover { background: var(--skill-bg); }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   Mermaid Diagram View
+   ══════════════════════════════════════════════════════════════════════════ */
+.dg-tab { flex: 1; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); }
+.dg-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.dg-toolbar {
+  display: flex; gap: 12px; align-items: center;
+  padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg-card);
+  flex-shrink: 0;
+}
+.dg-ctrl { font-size: 11px; color: var(--text-2); display: flex; gap: 6px; align-items: center; }
+.dg-ctrl select, .dg-ctrl input {
+  font: inherit; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-white);
+}
+.dg-btn {
+  font-size: 11px; padding: 4px 10px; border: 1px solid var(--border);
+  background: var(--bg-white); border-radius: 4px; cursor: pointer;
+}
+.dg-btn:hover { border-color: var(--agent); color: var(--agent); }
+.dg-status { font-size: 11px; color: var(--text-3); margin-left: auto; font-style: italic; }
+.dg-error {
+  padding: 12px 16px; background: #fef2f2; color: #991b1b;
+  border-bottom: 1px solid #fecaca; font-size: 12px; font-family: ui-monospace, monospace;
+}
+.dg-svg { flex: 1; overflow: auto; padding: 16px; }
+.dg-svg svg { display: block; margin: 0 auto; max-width: none; height: auto; }
+
+/* ══════════════════════════════════════════════════════════════════════════
    Stepped Lane View
    ══════════════════════════════════════════════════════════════════════════ */
 .sl-wrap { flex: 1; overflow: auto; padding: 18px 24px 32px; background: var(--bg); }
@@ -1473,6 +1500,9 @@ input, select { font-family: inherit; }
         <button :class="['tab', tab==='flow' ? 'tab--active' : '']" @click="tab='flow'">
           Flow
         </button>
+        <button :class="['tab', tab==='diagram' ? 'tab--active' : '']" @click="tab='diagram'">
+          Diagram
+        </button>
         <button :class="['tab', tab==='tree' ? 'tab--active' : '']" @click="tab='tree'">
           Tree<span class="tab__count" v-if="entries.length">({{ entries.length }})</span>
         </button>
@@ -1512,6 +1542,15 @@ input, select { font-family: inherit; }
                      :expanded-set="expandedSet"
                      @toggle="onToggleNode"></flow-node>
         </template>
+      </div>
+
+      <!-- Mermaid Diagram view -->
+      <div v-show="tab==='diagram'" class="dg-tab">
+        <div v-if="!activeSession" class="empty">Select a session from the sidebar</div>
+        <div v-else-if="!tree" class="empty">Loading...</div>
+        <diagram-view v-else :tree="tree"
+                      :session-tree-map="childSessionTreeMap"
+                      :session-desc-map="childSessionDescMap"></diagram-view>
       </div>
 
       <!-- Unified Flow view (BPMN + numbered steps) -->

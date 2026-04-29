@@ -285,6 +285,138 @@ function resolveAgentSubtree(node, descMap, treeMap) {
   return sid ? (treeMap.get(sid) || null) : null;
 }
 
+// ─── Mermaid diagram emitter ─────────────────────────────────────────────
+function treeToMermaid(root, opts = {}) {
+  const { maxDepth = 3, direction = 'TD', sessionDescMap = null, sessionTreeMap = null } = opts;
+  const lines = [`flowchart ${direction}`];
+  let counter = 0;
+  const nextId = () => `n${counter++}`;
+
+  // Mermaid-safe label
+  const esc = (s) => String(s || '')
+    .replace(/[\n\r]+/g, ' ')
+    .replace(/["`]/g, "'")
+    .replace(/[<>]/g, '')
+    .replace(/[\[\](){}]/g, '')
+    .slice(0, 70) || '—';
+
+  function agentLabel(n) {
+    const t = n.input?.agent || n.input?.subagent_type || 'agent';
+    const d = n.input?.description || '';
+    return d ? `${t}: ${d}` : t;
+  }
+
+  // Returns array of "anchors" {entry, exit} for chaining; subgraph anchors point to inner nodes.
+  function emit(node, depth, indent = '  ') {
+    const steps = groupIntoSteps(node);
+    const anchors = [];
+
+    for (const s of steps) {
+      if (s.kind === 'solo') {
+        const id = nextId();
+        const n = s.nodes[0];
+        const lbl = n.tool === 'User' ? `User prompt: ${getLabel(n)}` : `${n.tool}: ${getLabel(n)}`;
+        lines.push(`${indent}${id}(["${esc(lbl)}"]):::solo`);
+        anchors.push({ entry: id, exit: id });
+      } else if (s.kind === 'seq') {
+        const id = nextId();
+        const agg = aggregateStep(s.nodes);
+        const tools = agg.tools.map(t => `${t.tool}${t.count > 1 ? '×' + t.count : ''}`).join(' · ');
+        const meta = [tools, agg.span ? fmtDur(agg.span) : null].filter(Boolean).join(' · ');
+        lines.push(`${indent}${id}["${esc(meta)}"]:::seq`);
+        anchors.push({ entry: id, exit: id });
+      } else if (s.kind === 'orch') {
+        const n = s.nodes[0];
+        const lbl = `${n.tool}: ${getLabel(n)}`;
+        const sub = resolveAgentSubtree(n, sessionDescMap, sessionTreeMap) || (n.children?.length ? n : null);
+        if (depth < maxDepth && sub) {
+          const sgId = nextId();
+          lines.push(`${indent}subgraph ${sgId} ["${esc(lbl)}"]`);
+          const innerAnchors = emit(sub, depth + 1, indent + '  ');
+          lines.push(`${indent}end`);
+          lines.push(`${indent}class ${sgId} sgOrch`);
+          if (innerAnchors.length) {
+            anchors.push({ entry: innerAnchors[0].entry, exit: innerAnchors[innerAnchors.length - 1].exit });
+          } else {
+            const empty = nextId();
+            lines.push(`${indent}${empty}["(no ops)"]:::empty`);
+            anchors.push({ entry: empty, exit: empty });
+          }
+        } else {
+          const id = nextId();
+          const childCount = (sub?.children || n.children || []).length;
+          const collapsed = childCount ? `<br/><i>${childCount} ops collapsed</i>` : '';
+          lines.push(`${indent}${id}["${esc(lbl)}${collapsed}"]:::orch`);
+          anchors.push({ entry: id, exit: id });
+        }
+      } else if (s.kind === 'parallel') {
+        const fork = nextId();
+        const join = nextId();
+        lines.push(`${indent}${fork}{{"+"}}:::fork`);
+        lines.push(`${indent}${join}{{"+"}}:::fork`);
+        for (const n of s.nodes) {
+          const lbl = agentLabel(n);
+          const sub = resolveAgentSubtree(n, sessionDescMap, sessionTreeMap) || (n.children?.length ? n : null);
+          if (depth < maxDepth && sub) {
+            const sgId = nextId();
+            lines.push(`${indent}subgraph ${sgId} ["${esc(lbl)}"]`);
+            const innerAnchors = emit(sub, depth + 1, indent + '  ');
+            lines.push(`${indent}end`);
+            lines.push(`${indent}class ${sgId} sgAgent`);
+            if (innerAnchors.length) {
+              lines.push(`${indent}${fork} --> ${innerAnchors[0].entry}`);
+              lines.push(`${indent}${innerAnchors[innerAnchors.length - 1].exit} --> ${join}`);
+            } else {
+              const empty = nextId();
+              lines.push(`${indent}  ${empty}["(no ops)"]:::empty`);
+              lines.push(`${indent}${fork} --> ${empty}`);
+              lines.push(`${indent}${empty} --> ${join}`);
+            }
+          } else {
+            const id = nextId();
+            const childCount = (sub?.children || n.children || []).length;
+            const collapsed = childCount ? `<br/><i>${childCount} ops collapsed</i>` : '';
+            lines.push(`${indent}${id}["${esc(lbl)}${collapsed}"]:::orch`);
+            lines.push(`${indent}${fork} --> ${id}`);
+            lines.push(`${indent}${id} --> ${join}`);
+          }
+        }
+        anchors.push({ entry: fork, exit: join });
+      }
+    }
+    // chain consecutive anchors
+    for (let i = 0; i < anchors.length - 1; i++) {
+      lines.push(`${indent}${anchors[i].exit} --> ${anchors[i + 1].entry}`);
+    }
+    return anchors;
+  }
+
+  const startId = nextId();
+  const endId = nextId();
+  lines.push(`  ${startId}((▶)):::startNode`);
+  const anchors = emit(root, 0);
+  lines.push(`  ${endId}((■)):::endNode`);
+  if (anchors.length) {
+    lines.push(`  ${startId} --> ${anchors[0].entry}`);
+    lines.push(`  ${anchors[anchors.length - 1].exit} --> ${endId}`);
+  } else {
+    lines.push(`  ${startId} --> ${endId}`);
+  }
+
+  // class definitions
+  lines.push('  classDef startNode fill:#dcfce7,stroke:#16a34a,color:#166534,stroke-width:2px');
+  lines.push('  classDef endNode fill:#f1f5f9,stroke:#94a3b8,color:#475569,stroke-width:2px');
+  lines.push('  classDef solo fill:#eff6ff,stroke:#1d4ed8,color:#1e3a8a');
+  lines.push('  classDef seq fill:#f8fafc,stroke:#94a3b8,color:#334155');
+  lines.push('  classDef orch fill:#eff6ff,stroke:#2563eb,color:#1e3a8a,stroke-width:1.5px');
+  lines.push('  classDef fork fill:#fef3c7,stroke:#92400e,color:#92400e,stroke-width:2px');
+  lines.push('  classDef empty fill:#fafafa,stroke:#cbd5e1,color:#94a3b8');
+  lines.push('  classDef sgOrch fill:#eff6ff,stroke:#2563eb,color:#1e3a8a');
+  lines.push('  classDef sgAgent fill:#f5f3ff,stroke:#7c3aed,color:#5b21b6');
+
+  return lines.join('\n');
+}
+
 // ─── Token Index (binary search) ─────────────────────────────────────────
 function buildTokenIndex(entries, timeline) {
   const idx = new Map();
@@ -977,9 +1109,115 @@ const StepLane = {
 };
 StepLane.components = { 'flow-node': FlowNode, 'step-lane': StepLane };
 
+// ─── Diagram View (Mermaid) ──────────────────────────────────────────────
+let mermaidPromise = null;
+function loadMermaid() {
+  if (!mermaidPromise) {
+    mermaidPromise = import('mermaid').then(m => {
+      const mer = m.default || m;
+      mer.initialize({
+        startOnLoad: false,
+        theme: 'base',
+        securityLevel: 'loose',
+        flowchart: { htmlLabels: true, curve: 'basis', padding: 14 },
+        themeVariables: {
+          fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+          fontSize: '12px',
+          primaryColor: '#eff6ff',
+          primaryBorderColor: '#2563eb',
+          lineColor: '#94a3b8',
+        },
+      });
+      return mer;
+    });
+  }
+  return mermaidPromise;
+}
+
+const DiagramView = {
+  name: 'DiagramView',
+  props: {
+    tree: Object,
+    sessionTreeMap: Object,
+    sessionDescMap: Object,
+  },
+  setup(props) {
+    const containerRef = ref(null);
+    const direction = ref('TD');
+    const maxDepth = ref(3);
+    const error = ref('');
+    const source = ref('');
+    const rendering = ref(false);
+    let renderToken = 0;
+
+    async function render() {
+      if (!props.tree || !containerRef.value) return;
+      rendering.value = true; error.value = '';
+      const myToken = ++renderToken;
+      try {
+        const mer = await loadMermaid();
+        if (myToken !== renderToken) return;
+        source.value = treeToMermaid(props.tree, {
+          maxDepth: maxDepth.value,
+          direction: direction.value,
+          sessionTreeMap: props.sessionTreeMap,
+          sessionDescMap: props.sessionDescMap,
+        });
+        const id = 'mmd-' + Date.now();
+        const { svg } = await mer.render(id, source.value);
+        if (myToken !== renderToken) return;
+        containerRef.value.innerHTML = svg;
+      } catch (e) {
+        error.value = String(e?.message || e);
+      } finally {
+        rendering.value = false;
+      }
+    }
+
+    function copySource() {
+      navigator.clipboard?.writeText(source.value);
+    }
+    function downloadSvg() {
+      const svg = containerRef.value?.querySelector('svg');
+      if (!svg) return;
+      const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'loomscope-diagram.svg';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    onMounted(() => render());
+    watch(() => [props.tree, direction.value, maxDepth.value], () => render());
+
+    return { containerRef, direction, maxDepth, error, source, rendering, copySource, downloadSvg };
+  },
+  template: `
+    <div class="dg-wrap">
+      <div class="dg-toolbar">
+        <label class="dg-ctrl">Layout
+          <select v-model="direction">
+            <option value="TD">Top-down</option>
+            <option value="LR">Left-right</option>
+          </select>
+        </label>
+        <label class="dg-ctrl">Max depth
+          <input type="number" min="1" max="6" v-model.number="maxDepth" style="width:48px" />
+        </label>
+        <button class="dg-btn" @click="copySource">Copy source</button>
+        <button class="dg-btn" @click="downloadSvg">Download SVG</button>
+        <span v-if="rendering" class="dg-status">rendering…</span>
+      </div>
+      <div v-if="error" class="dg-error">Mermaid error: {{ error }}</div>
+      <div ref="containerRef" class="dg-svg"></div>
+    </div>
+  `
+};
+
 // ─── Main App ────────────────────────────────────────────────────────────
 const app = createApp({
-  components: { 'flow-node': FlowNode, 'process-node': ProcessNode, 'team-view': TeamView, 'sub-agent-flow': SubAgentFlowView, 'step-lane': StepLane },
+  components: { 'flow-node': FlowNode, 'process-node': ProcessNode, 'team-view': TeamView, 'sub-agent-flow': SubAgentFlowView, 'step-lane': StepLane, 'diagram-view': DiagramView },
   setup() {
     const sidebarWidth = ref(280);
     const sidebarDragging = ref(false);
