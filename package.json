@@ -4,7 +4,8 @@
   "description": "LoomScope — a viewer onto woven Claude agent threads",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/dev-rename-electron.js && electron-vite dev",
+    "postinstall": "node scripts/dev-rename-electron.js || true",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "dist": "npm run build && electron-builder",
