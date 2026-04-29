@@ -660,6 +660,8 @@ input, select { font-family: inherit; }
 }
 .dg-svg { flex: 1; overflow: auto; padding: 16px; }
 .dg-svg svg { display: block; margin: 0 auto; max-width: none; height: auto; }
+.dg-svg .clickable, .dg-svg [onclick] { cursor: pointer; }
+.dg-svg .clickable:hover rect, .dg-svg .clickable:hover polygon, .dg-svg .clickable:hover circle { filter: brightness(0.95); }
 
 /* ══════════════════════════════════════════════════════════════════════════
    Stepped Lane View
@@ -1522,7 +1524,8 @@ input, select { font-family: inherit; }
         <div v-else-if="!tree" class="empty">Loading...</div>
         <diagram-view v-else :tree="tree"
                       :session-tree-map="childSessionTreeMap"
-                      :session-desc-map="childSessionDescMap"></diagram-view>
+                      :session-desc-map="childSessionDescMap"
+                      :on-navigate="selectSession"></diagram-view>
       </div>
 
       <!-- Unified Flow view (BPMN + numbered steps) -->

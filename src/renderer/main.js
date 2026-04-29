@@ -286,9 +286,27 @@ function resolveAgentSubtree(node, descMap, treeMap) {
 }
 
 // ─── Mermaid diagram emitter ─────────────────────────────────────────────
+// Recursive aggregate of all leaf tokens + child counts under a node
+function aggregateRecursive(node) {
+  let inT = 0, outT = 0, dur = 0, count = 0;
+  function walk(n) {
+    const t = n.tokens;
+    if (t) {
+      inT += (t.input||0) + (t.cache_read||0) + (t.cache_create||0) + (t.cache_write||0);
+      outT += (t.output||0);
+      dur += (t.duration_ms||0);
+    }
+    count++;
+    for (const c of (n.children || [])) walk(c);
+  }
+  for (const c of (node.children || [])) walk(c);
+  return { inT, outT, dur, count };
+}
+
 function treeToMermaid(root, opts = {}) {
   const { maxDepth = 3, direction = 'TD', sessionDescMap = null, sessionTreeMap = null } = opts;
   const lines = [`flowchart ${direction}`];
+  const clicks = [];
   let counter = 0;
   const nextId = () => `n${counter++}`;
 
@@ -304,6 +322,21 @@ function treeToMermaid(root, opts = {}) {
     const t = n.input?.agent || n.input?.subagent_type || 'agent';
     const d = n.input?.description || '';
     return d ? `${t}: ${d}` : t;
+  }
+
+  function statsLine(agg) {
+    const bits = [];
+    if (agg.count) bits.push(`${agg.count} ops`);
+    if (agg.dur)   bits.push(fmtDur(agg.dur));
+    if (agg.inT)   bits.push(`↑${fmtK(agg.inT)}`);
+    if (agg.outT)  bits.push(`↓${fmtK(agg.outT)}`);
+    return bits.join(' · ');
+  }
+
+  function childSessionId(n) {
+    if (!sessionDescMap) return null;
+    const desc = String(n.input?.description || '').trim();
+    return desc ? (sessionDescMap.get(desc) || null) : null;
   }
 
   // Returns array of "anchors" {entry, exit} for chaining; subgraph anchors point to inner nodes.
@@ -322,19 +355,29 @@ function treeToMermaid(root, opts = {}) {
         const id = nextId();
         const agg = aggregateStep(s.nodes);
         const tools = agg.tools.map(t => `${t.tool}${t.count > 1 ? '×' + t.count : ''}`).join(' · ');
-        const meta = [tools, agg.span ? fmtDur(agg.span) : null].filter(Boolean).join(' · ');
-        lines.push(`${indent}${id}["${esc(meta)}"]:::seq`);
+        const stats = [];
+        if (agg.span) stats.push(fmtDur(agg.span));
+        if (agg.inT)  stats.push(`↑${fmtK(agg.inT)}`);
+        if (agg.outT) stats.push(`↓${fmtK(agg.outT)}`);
+        const labelParts = [tools];
+        if (stats.length) labelParts.push(stats.join(' · '));
+        lines.push(`${indent}${id}["${esc(labelParts[0])}${labelParts[1] ? '<br/><i>'+esc(labelParts[1])+'</i>' : ''}"]:::seq`);
         anchors.push({ entry: id, exit: id });
       } else if (s.kind === 'orch') {
         const n = s.nodes[0];
         const lbl = `${n.tool}: ${getLabel(n)}`;
         const sub = resolveAgentSubtree(n, sessionDescMap, sessionTreeMap) || (n.children?.length ? n : null);
+        const sid = childSessionId(n);
         if (depth < maxDepth && sub) {
           const sgId = nextId();
-          lines.push(`${indent}subgraph ${sgId} ["${esc(lbl)}"]`);
+          const agg = aggregateRecursive(sub);
+          const stats = statsLine(agg);
+          const sgLabel = stats ? `${esc(lbl)}<br/><i>${esc(stats)}</i>` : esc(lbl);
+          lines.push(`${indent}subgraph ${sgId} ["${sgLabel}"]`);
           const innerAnchors = emit(sub, depth + 1, indent + '  ');
           lines.push(`${indent}end`);
           lines.push(`${indent}class ${sgId} sgOrch`);
+          if (sid) clicks.push(`click ${sgId} call __loomNavigate("${sid}") "Open sub-agent session"`);
           if (innerAnchors.length) {
             anchors.push({ entry: innerAnchors[0].entry, exit: innerAnchors[innerAnchors.length - 1].exit });
           } else {
@@ -344,9 +387,11 @@ function treeToMermaid(root, opts = {}) {
           }
         } else {
           const id = nextId();
-          const childCount = (sub?.children || n.children || []).length;
-          const collapsed = childCount ? `<br/><i>${childCount} ops collapsed</i>` : '';
+          const agg = sub ? aggregateRecursive(sub) : { count: 0, dur: 0, inT: 0, outT: 0 };
+          const stats = statsLine(agg);
+          const collapsed = stats ? `<br/><i>${esc(stats)} collapsed</i>` : '';
           lines.push(`${indent}${id}["${esc(lbl)}${collapsed}"]:::orch`);
+          if (sid) clicks.push(`click ${id} call __loomNavigate("${sid}") "Open sub-agent session"`);
           anchors.push({ entry: id, exit: id });
         }
       } else if (s.kind === 'parallel') {
@@ -357,12 +402,17 @@ function treeToMermaid(root, opts = {}) {
         for (const n of s.nodes) {
           const lbl = agentLabel(n);
           const sub = resolveAgentSubtree(n, sessionDescMap, sessionTreeMap) || (n.children?.length ? n : null);
+          const sid = childSessionId(n);
           if (depth < maxDepth && sub) {
             const sgId = nextId();
-            lines.push(`${indent}subgraph ${sgId} ["${esc(lbl)}"]`);
+            const agg = aggregateRecursive(sub);
+            const stats = statsLine(agg);
+            const sgLabel = stats ? `${esc(lbl)}<br/><i>${esc(stats)}</i>` : esc(lbl);
+            lines.push(`${indent}subgraph ${sgId} ["${sgLabel}"]`);
             const innerAnchors = emit(sub, depth + 1, indent + '  ');
             lines.push(`${indent}end`);
             lines.push(`${indent}class ${sgId} sgAgent`);
+            if (sid) clicks.push(`click ${sgId} call __loomNavigate("${sid}") "Open sub-agent session"`);
             if (innerAnchors.length) {
               lines.push(`${indent}${fork} --> ${innerAnchors[0].entry}`);
               lines.push(`${indent}${innerAnchors[innerAnchors.length - 1].exit} --> ${join}`);
@@ -374,9 +424,11 @@ function treeToMermaid(root, opts = {}) {
             }
           } else {
             const id = nextId();
-            const childCount = (sub?.children || n.children || []).length;
-            const collapsed = childCount ? `<br/><i>${childCount} ops collapsed</i>` : '';
+            const agg = sub ? aggregateRecursive(sub) : { count: 0, dur: 0, inT: 0, outT: 0 };
+            const stats = statsLine(agg);
+            const collapsed = stats ? `<br/><i>${esc(stats)} collapsed</i>` : '';
             lines.push(`${indent}${id}["${esc(lbl)}${collapsed}"]:::orch`);
+            if (sid) clicks.push(`click ${id} call __loomNavigate("${sid}") "Open sub-agent session"`);
             lines.push(`${indent}${fork} --> ${id}`);
             lines.push(`${indent}${id} --> ${join}`);
           }
@@ -413,6 +465,9 @@ function treeToMermaid(root, opts = {}) {
   lines.push('  classDef empty fill:#fafafa,stroke:#cbd5e1,color:#94a3b8');
   lines.push('  classDef sgOrch fill:#eff6ff,stroke:#2563eb,color:#1e3a8a');
   lines.push('  classDef sgAgent fill:#f5f3ff,stroke:#7c3aed,color:#5b21b6');
+
+  // Clickable nodes (sub-agent navigation)
+  for (const c of clicks) lines.push('  ' + c);
 
   return lines.join('\n');
 }
@@ -1140,15 +1195,22 @@ const DiagramView = {
     tree: Object,
     sessionTreeMap: Object,
     sessionDescMap: Object,
+    onNavigate: Function,
   },
   setup(props) {
     const containerRef = ref(null);
     const direction = ref('TD');
     const maxDepth = ref(3);
+    const liveUpdate = ref(false);
     const error = ref('');
     const source = ref('');
     const rendering = ref(false);
     let renderToken = 0;
+    let renderDebounce = null;
+
+    // Expose navigation function for Mermaid click directives.
+    // Re-bound every render so the latest onNavigate handler is used.
+    window.__loomNavigate = (sid) => { if (props.onNavigate) props.onNavigate(sid); };
 
     async function render() {
       if (!props.tree || !containerRef.value) return;
@@ -1164,14 +1226,24 @@ const DiagramView = {
           sessionDescMap: props.sessionDescMap,
         });
         const id = 'mmd-' + Date.now();
-        const { svg } = await mer.render(id, source.value);
+        const { svg, bindFunctions } = await mer.render(id, source.value);
         if (myToken !== renderToken) return;
         containerRef.value.innerHTML = svg;
+        if (bindFunctions) bindFunctions(containerRef.value);
+        // Add cursor: pointer affordance to clickable nodes
+        containerRef.value.querySelectorAll('.node[id]').forEach(el => {
+          if (el.style) el.style.cursor = el.querySelector('a, [onclick]') ? 'pointer' : '';
+        });
       } catch (e) {
         error.value = String(e?.message || e);
       } finally {
         rendering.value = false;
       }
+    }
+
+    function scheduleRender() {
+      if (renderDebounce) clearTimeout(renderDebounce);
+      renderDebounce = setTimeout(render, 250);
     }
 
     function copySource() {
@@ -1189,9 +1261,15 @@ const DiagramView = {
     }
 
     onMounted(() => render());
-    watch(() => [props.tree, direction.value, maxDepth.value], () => render());
+    watch(() => [direction.value, maxDepth.value], () => render());
+    watch(() => props.tree, () => { if (liveUpdate.value) scheduleRender(); else render(); });
 
-    return { containerRef, direction, maxDepth, error, source, rendering, copySource, downloadSvg };
+    onUnmounted(() => {
+      if (window.__loomNavigate) delete window.__loomNavigate;
+      if (renderDebounce) clearTimeout(renderDebounce);
+    });
+
+    return { containerRef, direction, maxDepth, liveUpdate, error, source, rendering, copySource, downloadSvg, render };
   },
   template: `
     <div class="dg-wrap">
@@ -1205,6 +1283,8 @@ const DiagramView = {
         <label class="dg-ctrl">Max depth
           <input type="number" min="1" max="6" v-model.number="maxDepth" style="width:48px" />
         </label>
+        <label class="dg-ctrl"><input type="checkbox" v-model="liveUpdate" /> Live update</label>
+        <button class="dg-btn" @click="render">Refresh</button>
         <button class="dg-btn" @click="copySource">Copy source</button>
         <button class="dg-btn" @click="downloadSvg">Download SVG</button>
         <span v-if="rendering" class="dg-status">rendering…</span>
