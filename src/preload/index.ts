@@ -44,4 +44,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   archiveTeam: (teamName: string) => ipcRenderer.invoke('teams:archive', teamName),
+
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+
+  checkSettings: () => ipcRenderer.invoke('settings:check'),
+
+  setSettings: (patch: Record<string, string>) => ipcRenderer.invoke('settings:set', patch),
+
+  selectFolder: () => ipcRenderer.invoke('settings:select-folder'),
+
+  onSettingsChanged: (callback: (settings: Record<string, string>) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, settings: Record<string, string>) => callback(settings);
+    ipcRenderer.on('settings:changed', handler);
+    return () => ipcRenderer.removeListener('settings:changed', handler);
+  },
 });

@@ -36,9 +36,6 @@ export interface SessionInfo {
   agent_name: string;
 }
 
-const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
-const CLAUDE_TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
-
 function getProjectName(dirName: string): string {
   return dirName.replace(/^-/, '');
 }
@@ -50,15 +47,22 @@ function isActive(lastMtime: number): boolean {
 export class SessionManager extends EventEmitter {
   private sessions = new Map<string, SessionState>();
 
-  async loadAll(): Promise<void> {
-    if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) return;
+  constructor(
+    private projectsDir = path.join(os.homedir(), '.claude', 'projects'),
+    private teamsDir = path.join(os.homedir(), '.claude', 'teams'),
+  ) {
+    super();
+  }
 
-    const projectDirs = fs.readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
+  async loadAll(): Promise<void> {
+    if (!fs.existsSync(this.projectsDir)) return;
+
+    const projectDirs = fs.readdirSync(this.projectsDir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => d.name);
 
     for (const projDir of projectDirs) {
-      const projPath = path.join(CLAUDE_PROJECTS_DIR, projDir);
+      const projPath = path.join(this.projectsDir, projDir);
       let entries: fs.Dirent[];
       try {
         entries = fs.readdirSync(projPath, { withFileTypes: true });
@@ -68,7 +72,7 @@ export class SessionManager extends EventEmitter {
 
       // Load top-level session files first so parents exist before children link to them
       for (const entry of entries) {
-        if (!entry.isDirectory() && entry.name.endsWith('.jsonl')) {
+        if (!entry.isDirectory() && entry.name.endsWith('.jsonl') && !entry.name.endsWith('.flow.jsonl')) {
           this.loadSession(path.join(projPath, entry.name));
         }
       }
@@ -79,7 +83,8 @@ export class SessionManager extends EventEmitter {
         const subagentsDir = path.join(projPath, entry.name, 'subagents');
         if (!fs.existsSync(subagentsDir)) continue;
         try {
-          const subFiles = fs.readdirSync(subagentsDir).filter(f => f.endsWith('.jsonl'));
+          const subFiles = fs.readdirSync(subagentsDir)
+            .filter(f => f.endsWith('.jsonl') && !f.endsWith('.flow.jsonl'));
           for (const f of subFiles) {
             this.loadSession(path.join(subagentsDir, f));
           }
@@ -91,16 +96,16 @@ export class SessionManager extends EventEmitter {
   }
 
   private linkTeamSessions(): void {
-    if (!fs.existsSync(CLAUDE_TEAMS_DIR)) return;
+    if (!fs.existsSync(this.teamsDir)) return;
     let teamDirs: string[];
     try {
-      teamDirs = fs.readdirSync(CLAUDE_TEAMS_DIR, { withFileTypes: true })
+      teamDirs = fs.readdirSync(this.teamsDir, { withFileTypes: true })
         .filter(d => d.isDirectory())
         .map(d => d.name);
     } catch { return; }
 
     for (const teamName of teamDirs) {
-      const configPath = path.join(CLAUDE_TEAMS_DIR, teamName, 'config.json');
+      const configPath = path.join(this.teamsDir, teamName, 'config.json');
       let leadSessionId: string;
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -123,6 +128,7 @@ export class SessionManager extends EventEmitter {
   }
 
   loadSession(filePath: string): void {
+    if (filePath.endsWith('.flow.jsonl')) return;
     const sessionId = path.basename(filePath, '.jsonl');
     if (this.sessions.has(sessionId)) return;
 

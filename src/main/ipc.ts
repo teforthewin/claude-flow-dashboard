@@ -5,6 +5,7 @@ import os from 'os';
 import archiver from 'archiver';
 import { SessionManager } from './SessionManager';
 import { TeamMonitor } from './TeamMonitor';
+import { Settings } from './Settings';
 
 async function createTeamArchive(
   manager: SessionManager,
@@ -58,7 +59,31 @@ async function createTeamArchive(
   });
 }
 
-export function registerIpcHandlers(manager: SessionManager, teamMonitor: TeamMonitor): void {
+export function registerIpcHandlers(manager: SessionManager, teamMonitor: TeamMonitor, appSettings: Settings): void {
+  ipcMain.handle('settings:get', () => appSettings.get());
+
+  ipcMain.handle('settings:set', async (e, patch: Partial<{ projectsDir: string; teamsDir: string }>) => {
+    appSettings.set(patch);
+    BrowserWindow.fromWebContents(e.sender)?.webContents.send('settings:changed', appSettings.get());
+  });
+
+  ipcMain.handle('settings:select-folder', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender) ?? undefined;
+    const { filePaths, canceled } = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+    });
+    if (canceled || !filePaths.length) return null;
+    return filePaths[0];
+  });
+
+  ipcMain.handle('settings:check', () => {
+    const s = appSettings.get();
+    return {
+      projectsDir: fs.existsSync(s.projectsDir),
+      teamsDir: fs.existsSync(s.teamsDir),
+    };
+  });
+
   ipcMain.handle('teams:list', () => teamMonitor.getTeams());
   ipcMain.handle('teams:messages', (_e, teamName: string) => teamMonitor.getTeamMessages(teamName));
 

@@ -1534,9 +1534,6 @@ input, select { font-family: inherit; }
         <template v-for="[t,c] in topTools" :key="t">
           <span class="hud__tool">{{ t }} &times;{{ c }}</span>
         </template>
-        <span class="hud__children" v-if="stats.child_sessions?.length">
-          {{ stats.child_sessions.length }} subagent{{ stats.child_sessions.length > 1 ? 's' : '' }}
-        </span>
         <button class="hud__parent" v-if="activeParentSession"
                 @click="selectSession(activeParentSession.session_id)">
           ↑ parent session

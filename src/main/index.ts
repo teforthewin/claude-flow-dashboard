@@ -1,5 +1,6 @@
 import { app, BrowserWindow, nativeImage } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { SessionManager } from './SessionManager';
 import { LogWatcher } from './LogWatcher';
 import { TeamMonitor } from './TeamMonitor';
@@ -13,16 +14,18 @@ let sessionManager: SessionManager;
 let logWatcher: LogWatcher;
 let teamMonitor: TeamMonitor;
 let settings: Settings;
+let managerListeners: (() => void) | null = null;
 
-function resolveIconPath(): string {
+function resolveIconPath(): string | undefined {
   const candidates = [
     path.join(__dirname, '../../build/icon.png'),
     path.join(process.resourcesPath || '', 'icon.png'),
   ];
   for (const p of candidates) {
-    try { if (require('fs').existsSync(p)) return p; } catch {}
+    try { if (fs.existsSync(p)) return p; } catch {}
   }
-  return candidates[0];
+  console.warn('[LoomScope] icon not found in any of:', candidates);
+  return undefined;
 }
 
 function createWindow(): void {
@@ -31,14 +34,14 @@ function createWindow(): void {
     width: 1400,
     height: 900,
     title: 'LoomScope',
-    icon: iconPath,
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       sandbox: false,
     },
   });
 
-  if (process.platform === 'darwin' && app.dock) {
+  if (iconPath && process.platform === 'darwin' && app.dock) {
     try { app.dock.setIcon(nativeImage.createFromPath(iconPath)); } catch {}
   }
 
@@ -68,22 +71,31 @@ async function startManagers(): Promise<void> {
 
   registerIpcHandlers(sessionManager, teamMonitor, settings);
 
-  sessionManager.on('session:new', () => {
+  const onSessionNew = () => {
     mainWindow?.webContents.send('sessions:updated');
-  });
-
-  sessionManager.on('session:entry', (sessionId: string, entry: unknown) => {
+  };
+  const onSessionEntry = (sessionId: string, entry: unknown) => {
     mainWindow?.webContents.send('sessions:entry', { sessionId, entry });
     mainWindow?.webContents.send('sessions:updated');
-  });
-
-  teamMonitor.on('teams:updated', () => {
+  };
+  const onTeamsUpdated = () => {
     mainWindow?.webContents.send('teams:updated');
-  });
-
-  teamMonitor.on('team:revoked', (teamName: string) => {
+  };
+  const onTeamRevoked = (teamName: string) => {
     mainWindow?.webContents.send('teams:revoked', teamName);
-  });
+  };
+
+  sessionManager.on('session:new', onSessionNew);
+  sessionManager.on('session:entry', onSessionEntry);
+  teamMonitor.on('teams:updated', onTeamsUpdated);
+  teamMonitor.on('team:revoked', onTeamRevoked);
+
+  managerListeners = () => {
+    sessionManager.off('session:new', onSessionNew);
+    sessionManager.off('session:entry', onSessionEntry);
+    teamMonitor.off('teams:updated', onTeamsUpdated);
+    teamMonitor.off('team:revoked', onTeamRevoked);
+  };
 }
 
 app.whenReady().then(async () => {
@@ -97,6 +109,8 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  managerListeners?.();
+  managerListeners = null;
   logWatcher?.stop();
   teamMonitor?.stop();
   if (process.platform !== 'darwin') app.quit();

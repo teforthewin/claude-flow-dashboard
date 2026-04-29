@@ -3,19 +3,22 @@ import path from 'path';
 import os from 'os';
 import { SessionManager } from './SessionManager';
 
-const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 const DEBOUNCE_MS = 50;
 
 export class LogWatcher {
   private watcher: FSWatcher | null = null;
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private projectsDir: string;
 
-  constructor(private manager: SessionManager) {}
+  constructor(private manager: SessionManager, projectsDir?: string) {
+    this.projectsDir = projectsDir ?? path.join(os.homedir(), '.claude', 'projects');
+  }
 
   start(): void {
-    this.watcher = chokidar.watch(`${CLAUDE_PROJECTS_DIR}/**/*.jsonl`, {
+    this.watcher = chokidar.watch(`${this.projectsDir}/**/*.jsonl`, {
       persistent: true,
       ignoreInitial: true,
+      ignored: /\.flow\.jsonl$/,
       awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
     });
 

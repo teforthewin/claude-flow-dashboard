@@ -12,7 +12,7 @@ export interface AppEntry {
   action_id: string;
   parent_id: string | null;
   child_ids: string[];
-  event: 'pre' | 'post' | 'prompt';
+  event: 'pre' | 'post' | 'prompt' | 'command';
   tool: string;
   cmd: string;
   input: Record<string, unknown>;
@@ -27,13 +27,15 @@ export interface TimelineEntry {
   cache_read: number;
   cache_create: number;
   tools: string[];
+  skills: string[];   // skill names from Skill tool calls in this turn
+  agents: string[];   // agent types from Agent tool calls in this turn
 }
 
 export interface Stats {
   tokens: TokenCounts;
   tools: Record<string, number>;
-  child_sessions: unknown[];
   timeline: TimelineEntry[];
+  agentRole: string;   // value from agent-setting entry (e.g. 'api-core-generator')
 }
 
 export interface ParseResult {
@@ -234,10 +236,16 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
       stats.tokens.cache_create += turnTokens.cache_create;
 
       const toolNames: string[] = [];
+      const skillNames: string[] = [];
+      const agentNames: string[] = [];
       toolUses.forEach((tu, idx) => {
         const toolName = tu.name || 'Unknown';
         const input = tu.input || {};
         toolNames.push(toolName);
+        if (toolName === 'Skill' && input.skill) skillNames.push(String(input.skill));
+        if (toolName === 'Agent' && (input.subagent_type || input.agent)) {
+          agentNames.push(String(input.subagent_type || input.agent || 'general-purpose'));
+        }
         stats.tools[toolName] = (stats.tools[toolName] || 0) + 1;
 
         entries.push({
@@ -254,7 +262,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
       });
 
       if (turnTokens.input || turnTokens.output || turnTokens.cache_read || turnTokens.cache_create) {
-        stats.timeline.push({ ts, ...turnTokens, tools: toolNames });
+        stats.timeline.push({ ts, ...turnTokens, tools: toolNames, skills: skillNames, agents: agentNames });
       }
 
     } else if (obj.type === 'user') {
@@ -326,6 +334,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
     }
   }
 
+  stats.agentRole = sessionAgentSetting;
   return { entries, stats, lastLine: lines.length, agentSetting: sessionAgentSetting, agentName: sessionAgentName, teamName: sessionTeamName, teamTask: sessionTeamTask };
 }
 
@@ -333,8 +342,8 @@ function emptyStats(): Stats {
   return {
     tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0 },
     tools: {},
-    child_sessions: [],
     timeline: [],
+    agentRole: '',
   };
 }
 
@@ -351,7 +360,7 @@ export function mergeStats(base: Stats, delta: Stats): Stats {
       cache_create: base.tokens.cache_create + delta.tokens.cache_create,
     },
     tools,
-    child_sessions: [],
     timeline: [...base.timeline, ...delta.timeline],
+    agentRole: base.agentRole || delta.agentRole,
   };
 }

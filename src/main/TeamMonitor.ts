@@ -131,7 +131,12 @@ export class TeamMonitor extends EventEmitter {
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly DEBOUNCE_MS = 100;
   private readonly ACTIVE_WINDOW_MS = 30 * 60 * 1000;
-  readonly TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
+  readonly TEAMS_DIR: string;
+
+  constructor(teamsDir?: string) {
+    super();
+    this.TEAMS_DIR = teamsDir ?? path.join(os.homedir(), '.claude', 'teams');
+  }
 
   private isRevoked(config: TeamConfig): boolean {
     if (config.status && config.status !== 'active') return true;

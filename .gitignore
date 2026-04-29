@@ -3,3 +3,12 @@ out/
 dist/
 .DS_Store
 *.local
+
+# Legacy Python artefacts
+flow-dashboard/flow-logs/
+flow-dashboard/__pycache__/
+**/__pycache__/
+**/*.pyc
+
+# Internal planning docs
+flow-dashboard-plan.md
