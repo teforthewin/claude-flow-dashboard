@@ -13,7 +13,9 @@ const { spawnSync } = require('child_process');
 if (process.platform !== 'darwin') process.exit(0);
 
 const APP_NAME = 'LoomScope';
-const plistPath = path.resolve(__dirname, '..', 'node_modules/electron/dist/Electron.app/Contents/Info.plist');
+const APP_ID = 'com.loomscope.dev';
+const APP_DIR = path.resolve(__dirname, '..', 'node_modules/electron/dist/Electron.app');
+const plistPath = path.join(APP_DIR, 'Contents/Info.plist');
 
 if (!fs.existsSync(plistPath)) {
   console.warn('[dev-rename] Electron app not found at', plistPath);
@@ -31,10 +33,26 @@ function set(key, value) {
   spawnSync(PB, ['-c', cmd, plistPath]);
 }
 
-const before = get('CFBundleName');
-if (before === APP_NAME) {
-  process.exit(0);
-}
+const beforeName = get('CFBundleName');
+const beforeId = get('CFBundleIdentifier');
+const beforeDisp = get('CFBundleDisplayName');
+
+const allOk = beforeName === APP_NAME && beforeId === APP_ID && beforeDisp === APP_NAME;
+if (allOk) process.exit(0);
+
 set('CFBundleName', APP_NAME);
 set('CFBundleDisplayName', APP_NAME);
-console.log(`[dev-rename] patched Electron Info.plist: CFBundleName ${before || '(unset)'} → ${APP_NAME}`);
+set('CFBundleIdentifier', APP_ID);
+
+// Force Launch Services to re-read the bundle so the menu-bar/Dock pick up
+// the new name instead of returning the cached "Electron" entry.
+const LSREG = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
+if (fs.existsSync(LSREG)) {
+  spawnSync(LSREG, ['-f', APP_DIR], { stdio: 'ignore' });
+}
+
+// Refresh the Dock so the icon tooltip + menu-bar pick up the new name.
+spawnSync('killall', ['Dock'], { stdio: 'ignore' });
+
+console.log(`[dev-rename] Electron bundle patched → ${APP_NAME} (${APP_ID})`);
+console.log('[dev-rename] If a previous Electron is still running, quit it (cmd+Q) before starting dev.');
