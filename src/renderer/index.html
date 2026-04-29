@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Flow Dashboard</title>
+<title>LoomScope</title>
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
-   Claude Flow Dashboard — Clean light theme with strong hierarchy
+   LoomScope — Clean light theme with strong hierarchy
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
@@ -1310,7 +1310,7 @@ input, select { font-family: inherit; }
 
   <!-- ═══ Top Bar ═══════════════════════════════════════════════════════════ -->
   <header class="topbar">
-    <span class="topbar__logo"><span>Claude</span> Flow</span>
+    <span class="topbar__logo"><span>Loom</span>Scope</span>
     <span class="topbar__session" v-if="activeSession">{{ activeSession.length > 28 ? activeSession.slice(0,28)+'...' : activeSession }}</span>
     <button :class="['topbar__refresh', reloading ? 'topbar__refresh--spinning' : '']"
             @click="reloadAll" title="Reload all sessions from disk">&#8635;</button>

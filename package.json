@@ -1,7 +1,7 @@
 {
-  "name": "claude-flow-dashboard",
+  "name": "loomscope",
   "version": "1.0.2",
-  "description": "Claude Code session visualizer",
+  "description": "LoomScope — a viewer onto woven Claude agent threads",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -27,8 +27,8 @@
     "vite": "^5.3.1"
   },
   "build": {
-    "appId": "com.claude.flow-dashboard",
-    "productName": "Claude Flow Dashboard",
+    "appId": "com.loomscope.app",
+    "productName": "LoomScope",
     "copyright": "Copyright © 2025",
     "asar": true,
     "directories": {

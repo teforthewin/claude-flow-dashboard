@@ -6,6 +6,8 @@ import { TeamMonitor } from './TeamMonitor';
 import { Settings } from './Settings';
 import { registerIpcHandlers } from './ipc';
 
+app.setName('LoomScope');
+
 let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager;
 let logWatcher: LogWatcher;
@@ -28,7 +30,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'Claude Flow Dashboard',
+    title: 'LoomScope',
     icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
