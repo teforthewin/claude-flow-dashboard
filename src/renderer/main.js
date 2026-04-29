@@ -1284,8 +1284,6 @@ const app = createApp({
     const collapsedProjects = reactive({});
     const selectMode = ref(false);
     const selectedSessions = ref(new Set());
-    const expandedSet = ref(new Set());
-    const treeWrap = ref(null);
     const eventsTable = ref(null);
     const searchInput = ref(null);
     const rawPanel = ref(null);
@@ -1796,14 +1794,6 @@ const app = createApp({
         await loadSessions();
       } catch(e) {}
     }
-    function onToggleNode(id) { const s=new Set(expandedSet.value); if (s.has(id)) s.delete(id); else s.add(id); expandedSet.value=s; }
-    function expandAll() {
-      if (!treeData.value) return; const s=new Set();
-      (function walk(n){ if (n.children?.length){ s.add(n.id); n.children.forEach(walk); } })(treeData.value.root);
-      expandedSet.value=s;
-    }
-    function collapseAll() { expandedSet.value=new Set(); }
-
     async function loadSessions() {
       try {
         sessions.value = await window.electronAPI.getSessions();
@@ -1826,7 +1816,6 @@ const app = createApp({
           cleanupEntryListener?.(); cleanupEntryListener = null;
           activeSession.value = prevActive;
           entries.value = []; stats.value = null; treeData.value = null; treeVersion.value++;
-          expandedSet.value = new Set();
           Object.keys(openResps).forEach(k => delete openResps[k]);
           Object.keys(openRawLines).forEach(k => delete openRawLines[k]);
           const [er, sr] = await Promise.all([
@@ -1834,7 +1823,7 @@ const app = createApp({
             window.electronAPI.getStats(prevActive).catch(() => null),
           ]);
           entries.value = er.entries || []; stats.value = sr;
-          if (entries.value.length) { treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers(); }
+          if (entries.value.length) { treeData.value = buildTree(entries.value); treeVersion.value++; }
           await loadChildSessions(prevActive);
           connectEntryListener(prevActive);
         }
@@ -1842,21 +1831,11 @@ const app = createApp({
       finally { reloading.value = false; }
     }
 
-    function autoExpandContainers() {
-      if (!treeData.value) return;
-      const s = new Set();
-      (function walk(n) {
-        if (n.children?.length && (n.tool==='Claude'||n.tool==='Agent'||n.tool==='Skill')) s.add(n.id);
-        n.children?.forEach(walk);
-      })(treeData.value.root);
-      expandedSet.value = s;
-    }
-
     async function selectSession(id) {
       if (id===activeSession.value) return;
       cleanupEntryListener?.(); cleanupEntryListener = null;
       activeSession.value=id; entries.value=[]; stats.value=null; treeData.value=null; treeVersion.value++;
-      expandedSet.value=new Set(); Object.keys(openResps).forEach(k=>delete openResps[k]);
+      Object.keys(openResps).forEach(k=>delete openResps[k]);
       Object.keys(openRawLines).forEach(k=>delete openRawLines[k]);
       childSessionEntries.value=new Map();
       try {
@@ -1866,7 +1845,7 @@ const app = createApp({
         ]);
         if (id!==activeSession.value) return;
         entries.value = er.entries||[]; stats.value = sr;
-        if (entries.value.length) { treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers(); }
+        if (entries.value.length) { treeData.value = buildTree(entries.value); treeVersion.value++; }
         await loadChildSessions(id);
       } catch(e){}
       connectEntryListener(id);
@@ -1877,15 +1856,9 @@ const app = createApp({
         if (data.sessionId !== id) return;
         const entry = data.entry;
         entries.value = [...entries.value, entry];
-        if (treeData.value) {
-          treeData.value = buildTree(entries.value); treeVersion.value++;
-          autoExpandContainers();
-        } else {
-          treeData.value = buildTree(entries.value); treeVersion.value++; autoExpandContainers();
-        }
+        treeData.value = buildTree(entries.value); treeVersion.value++;
         if (autoScroll.value) {
           nextTick(()=>{
-            if (tab.value==='tree' && treeWrap.value) treeWrap.value.scrollTop=treeWrap.value.scrollHeight;
             if (tab.value==='events' && eventsTable.value) eventsTable.value.scrollTop=eventsTable.value.scrollHeight;
             if (showRawLog.value && rawPanel.value) rawPanel.value.scrollTop=rawPanel.value.scrollHeight;
           });
@@ -1904,13 +1877,11 @@ const app = createApp({
       switch(e.key) {
         case '/': e.preventDefault(); searchInput.value?.focus(); break;
         case 'e': tab.value='events'; break;
-        case 't': tab.value='tree'; break;
+        case 'd': tab.value='diagram'; break;
         case 'p': tab.value='flow'; break;
         case 'm': tab.value='teams'; break;
-        case 'k': tab.value='tokens'; break;
         case 'j': case 'ArrowDown': { e.preventDefault(); const items=[...document.querySelectorAll('.sess')]; const cur=items.findIndex(el=>el.classList.contains('sess--active')); if (items[cur+1]) items[cur+1].click(); break; }
         case 'k': case 'ArrowUp': { e.preventDefault(); const items=[...document.querySelectorAll('.sess')]; const cur=items.findIndex(el=>el.classList.contains('sess--active')); if (items[cur-1]) items[cur-1].click(); break; }
-        case 'Escape': collapseAll(); break;
       }
     }
 
@@ -1943,12 +1914,11 @@ const app = createApp({
     return { sidebarWidth, sidebarDragging, startSidebarResize,
              sessions, activeSession, entries, stats, liveConnected, reloading, reloadAll, tab, autoScroll,
              sessionSearch, eventSearch, eventToolFilter, eventDirFilter, openResps,
-             collapsedProjects, expandedSet, treeWrap, eventsTable, searchInput,
+             collapsedProjects, eventsTable, searchInput,
              tree, tokenIndex, topTools, estimatedCost, sessionDuration,
              filteredProjectGroups, filteredEvents, availableTools,
              groupByDate, timeOf, fmtK, fmtT, summarise, fmtResp, toolClass,
              selectSession, toggleProject, toggleEventResp,
-             onToggleNode, expandAll, collapseAll,
              selectMode, selectedSessions, toggleSelectMode,
              toggleSessionSelect, selectAllVisible, isProjectFullySelected, isProjectPartiallySelected, toggleProjectSelect,
              deleteSingleSession, deleteSelectedSessions,

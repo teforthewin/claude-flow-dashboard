@@ -304,8 +304,6 @@ input, select { font-family: inherit; }
 /* ══════════════════════════════════════════════════════════════════════════
    TREE VIEW — Strong visual hierarchy
    ══════════════════════════════════════════════════════════════════════════ */
-.tree-wrap { flex: 1; overflow: auto; padding: 16px 20px; background: var(--bg); }
-
 /* ── Agent node (container — visually prominent) ─────────────────────────── */
 .n-agent {
   margin-bottom: 6px; border-radius: var(--radius);
@@ -1503,9 +1501,6 @@ input, select { font-family: inherit; }
         <button :class="['tab', tab==='diagram' ? 'tab--active' : '']" @click="tab='diagram'">
           Diagram
         </button>
-        <button :class="['tab', tab==='tree' ? 'tab--active' : '']" @click="tab='tree'">
-          Tree<span class="tab__count" v-if="entries.length">({{ entries.length }})</span>
-        </button>
         <button :class="['tab', tab==='events' ? 'tab--active' : '']" @click="tab='events'">
           Events<span class="tab__count" v-if="entries.length">({{ filteredEvents.length }})</span>
         </button>
@@ -1516,32 +1511,9 @@ input, select { font-family: inherit; }
           Tokens
         </button>
         <div class="tab-tools">
-          <template v-if="tab==='tree'">
-            <button class="tab-btn" @click="expandAll">Expand all</button>
-            <button class="tab-btn" @click="collapseAll">Collapse all</button>
-            <button :class="['tab-btn', autoScroll ? 'tab-btn--active' : '']"
-                    @click="autoScroll=!autoScroll">Auto-scroll</button>
-          </template>
           <button :class="['tab-btn', showRawLog ? 'tab-btn--active' : '']"
                   @click="showRawLog=!showRawLog">Raw Log</button>
         </div>
-      </div>
-
-      <!-- Tree view -->
-      <div v-show="tab==='tree'" class="tree-wrap" ref="treeWrap">
-        <div v-if="!activeSession" class="empty">Select a session from the sidebar</div>
-        <div v-else-if="!tree" class="empty">Loading...</div>
-        <template v-else>
-          <div class="n-root">
-            <div class="n-root__badge">C</div>
-            <span class="n-root__label">Claude</span>
-            <span class="n-root__time">{{ fmtT(tree.ts) }} UTC</span>
-          </div>
-          <flow-node v-for="child in tree.children" :key="child.id"
-                     :node="child" :token-index="tokenIndex" :depth="0"
-                     :expanded-set="expandedSet"
-                     @toggle="onToggleNode"></flow-node>
-        </template>
       </div>
 
       <!-- Mermaid Diagram view -->
