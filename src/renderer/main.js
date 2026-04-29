@@ -307,6 +307,7 @@ function treeToMermaid(root, opts = {}) {
   const { maxDepth = 3, direction = 'TD', sessionDescMap = null, sessionTreeMap = null } = opts;
   const lines = [`flowchart ${direction}`];
   const clicks = [];
+  const meta = {};
   let counter = 0;
   const nextId = () => `n${counter++}`;
 
@@ -350,6 +351,11 @@ function treeToMermaid(root, opts = {}) {
         const n = s.nodes[0];
         const lbl = n.tool === 'User' ? `User prompt: ${getLabel(n)}` : `${n.tool}: ${getLabel(n)}`;
         lines.push(`${indent}${id}(["${esc(lbl)}"]):::solo`);
+        meta[id] = {
+          kind: 'solo', tool: n.tool, ts: n.ts,
+          title: n.tool === 'User' ? 'User prompt' : n.tool,
+          fullText: n.cmd || getLabel(n) || (n.input?.message || ''),
+        };
         anchors.push({ entry: id, exit: id });
       } else if (s.kind === 'seq') {
         const id = nextId();
@@ -362,6 +368,12 @@ function treeToMermaid(root, opts = {}) {
         const labelParts = [tools];
         if (stats.length) labelParts.push(stats.join(' · '));
         lines.push(`${indent}${id}["${esc(labelParts[0])}${labelParts[1] ? '<br/><i>'+esc(labelParts[1])+'</i>' : ''}"]:::seq`);
+        meta[id] = {
+          kind: 'seq', title: 'Sequential operations',
+          tsStart: s.nodes[0]?.ts, tsEnd: s.nodes[s.nodes.length-1]?.postTs || s.nodes[s.nodes.length-1]?.ts,
+          duration: agg.span, inT: agg.inT, outT: agg.outT,
+          ops: s.nodes.map(n => ({ tool: n.tool, label: getLabel(n) })),
+        };
         anchors.push({ entry: id, exit: id });
       } else if (s.kind === 'orch') {
         const n = s.nodes[0];
@@ -377,6 +389,11 @@ function treeToMermaid(root, opts = {}) {
           const innerAnchors = emit(sub, depth + 1, indent + '  ');
           lines.push(`${indent}end`);
           lines.push(`${indent}class ${sgId} sgOrch`);
+          meta[sgId] = {
+            kind: 'orch', title: lbl, ts: n.ts, postTs: n.postTs,
+            description: getDescription(n), agg, sessionId: sid,
+            response: formatResponse(n.response).slice(0, 600),
+          };
           if (sid) clicks.push(`click ${sgId} call __loomNavigate("${sid}") "Open sub-agent session"`);
           if (innerAnchors.length) {
             anchors.push({ entry: innerAnchors[0].entry, exit: innerAnchors[innerAnchors.length - 1].exit });
@@ -391,6 +408,11 @@ function treeToMermaid(root, opts = {}) {
           const stats = statsLine(agg);
           const collapsed = stats ? `<br/><i>${esc(stats)} collapsed</i>` : '';
           lines.push(`${indent}${id}["${esc(lbl)}${collapsed}"]:::orch`);
+          meta[id] = {
+            kind: 'orch-collapsed', title: lbl, ts: n.ts, postTs: n.postTs,
+            description: getDescription(n), agg, sessionId: sid,
+            response: formatResponse(n.response).slice(0, 600),
+          };
           if (sid) clicks.push(`click ${id} call __loomNavigate("${sid}") "Open sub-agent session"`);
           anchors.push({ entry: id, exit: id });
         }
@@ -412,6 +434,11 @@ function treeToMermaid(root, opts = {}) {
             const innerAnchors = emit(sub, depth + 1, indent + '  ');
             lines.push(`${indent}end`);
             lines.push(`${indent}class ${sgId} sgAgent`);
+            meta[sgId] = {
+              kind: 'parallel-agent', title: lbl, ts: n.ts, postTs: n.postTs,
+              description: getDescription(n), agg, sessionId: sid,
+              response: formatResponse(n.response).slice(0, 600),
+            };
             if (sid) clicks.push(`click ${sgId} call __loomNavigate("${sid}") "Open sub-agent session"`);
             if (innerAnchors.length) {
               lines.push(`${indent}${fork} --> ${innerAnchors[0].entry}`);
@@ -428,6 +455,11 @@ function treeToMermaid(root, opts = {}) {
             const stats = statsLine(agg);
             const collapsed = stats ? `<br/><i>${esc(stats)} collapsed</i>` : '';
             lines.push(`${indent}${id}["${esc(lbl)}${collapsed}"]:::orch`);
+            meta[id] = {
+              kind: 'parallel-agent-collapsed', title: lbl, ts: n.ts, postTs: n.postTs,
+              description: getDescription(n), agg, sessionId: sid,
+              response: formatResponse(n.response).slice(0, 600),
+            };
             if (sid) clicks.push(`click ${id} call __loomNavigate("${sid}") "Open sub-agent session"`);
             lines.push(`${indent}${fork} --> ${id}`);
             lines.push(`${indent}${id} --> ${join}`);
@@ -469,7 +501,7 @@ function treeToMermaid(root, opts = {}) {
   // Clickable nodes (sub-agent navigation)
   for (const c of clicks) lines.push('  ' + c);
 
-  return lines.join('\n');
+  return { source: lines.join('\n'), meta };
 }
 
 // ─── Token Index (binary search) ─────────────────────────────────────────
@@ -1212,6 +1244,78 @@ const DiagramView = {
     // Re-bound every render so the latest onNavigate handler is used.
     window.__loomNavigate = (sid) => { if (props.onNavigate) props.onNavigate(sid); };
 
+    const tooltip = ref({ visible: false, x: 0, y: 0, data: null });
+    let nodeMeta = {};
+
+    function buildTooltipHtml(d) {
+      if (!d) return '';
+      const fmtTs = (ts) => ts ? ts.replace('T', ' ').slice(0, 19) + ' UTC' : '';
+      const escHtml = (s) => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const parts = [];
+      parts.push(`<div class="dg-tip__title">${escHtml(d.title || '')}</div>`);
+      if (d.description) parts.push(`<div class="dg-tip__desc">${escHtml(d.description)}</div>`);
+      const tsLine = [];
+      if (d.ts || d.tsStart) tsLine.push(`<span>start: ${fmtTs(d.ts || d.tsStart)}</span>`);
+      if (d.postTs || d.tsEnd) tsLine.push(`<span>end: ${fmtTs(d.postTs || d.tsEnd)}</span>`);
+      if (d.duration) tsLine.push(`<span>dur: ${fmtDur(d.duration)}</span>`);
+      if (tsLine.length) parts.push(`<div class="dg-tip__meta">${tsLine.join(' · ')}</div>`);
+      const t = d.agg || { inT: d.inT, outT: d.outT, count: 0, dur: d.duration };
+      const stats = [];
+      if (t.count) stats.push(`${t.count} ops`);
+      if (t.dur) stats.push(fmtDur(t.dur));
+      if (t.inT) stats.push(`↑${fmtK(t.inT)} tokens in`);
+      if (t.outT) stats.push(`↓${fmtK(t.outT)} tokens out`);
+      if (stats.length) parts.push(`<div class="dg-tip__meta">${stats.join(' · ')}</div>`);
+      if (d.ops?.length) {
+        const opsHtml = d.ops.slice(0, 20).map(o =>
+          `<li><b>${escHtml(o.tool)}</b> ${escHtml((o.label||'').slice(0, 80))}</li>`
+        ).join('');
+        const more = d.ops.length > 20 ? `<li class="dg-tip__more">+${d.ops.length - 20} more</li>` : '';
+        parts.push(`<ul class="dg-tip__ops">${opsHtml}${more}</ul>`);
+      }
+      if (d.fullText) parts.push(`<div class="dg-tip__body">${escHtml(d.fullText)}</div>`);
+      if (d.response) parts.push(`<div class="dg-tip__resp"><div class="dg-tip__resp-lbl">Response</div><pre>${escHtml(d.response)}</pre></div>`);
+      if (d.sessionId) parts.push(`<div class="dg-tip__hint">Click to open sub-agent session →</div>`);
+      return parts.join('');
+    }
+
+    function attachHoverHandlers() {
+      if (!containerRef.value) return;
+      const root = containerRef.value;
+      // Mermaid renders SVG node ids like "flowchart-n0-1"; subgraph cluster ids like "n3"
+      function clampPos(x, y) {
+        const w = 460, h = 280, pad = 12;
+        const vw = window.innerWidth, vh = window.innerHeight;
+        if (x + w + pad > vw) x = Math.max(pad, vw - w - pad);
+        if (y + h + pad > vh) y = Math.max(pad, vh - h - pad);
+        return { x, y };
+      }
+      Object.entries(nodeMeta).forEach(([myId, data]) => {
+        const candidates = [
+          root.querySelector(`g[id^="flowchart-${myId}-"]`),
+          root.querySelector(`g.cluster[id="${myId}"]`),
+          root.querySelector(`g.cluster[id^="${myId}-"]`),
+        ].filter(Boolean);
+        const el = candidates[0];
+        if (!el) return;
+        el.style.cursor = data.sessionId ? 'pointer' : 'help';
+        el.addEventListener('mouseenter', (ev) => {
+          const p = clampPos(ev.clientX + 14, ev.clientY + 14);
+          tooltip.value = { visible: true, x: p.x, y: p.y, data };
+        });
+        el.addEventListener('mousemove', (ev) => {
+          if (tooltip.value.visible) {
+            const p = clampPos(ev.clientX + 14, ev.clientY + 14);
+            tooltip.value = { ...tooltip.value, x: p.x, y: p.y };
+          }
+        });
+        el.addEventListener('mouseleave', () => {
+          tooltip.value = { visible: false, x: 0, y: 0, data: null };
+        });
+      });
+    }
+
     async function render() {
       if (!props.tree || !containerRef.value) return;
       rendering.value = true; error.value = '';
@@ -1219,21 +1323,20 @@ const DiagramView = {
       try {
         const mer = await loadMermaid();
         if (myToken !== renderToken) return;
-        source.value = treeToMermaid(props.tree, {
+        const out = treeToMermaid(props.tree, {
           maxDepth: maxDepth.value,
           direction: direction.value,
           sessionTreeMap: props.sessionTreeMap,
           sessionDescMap: props.sessionDescMap,
         });
+        source.value = out.source;
+        nodeMeta = out.meta;
         const id = 'mmd-' + Date.now();
         const { svg, bindFunctions } = await mer.render(id, source.value);
         if (myToken !== renderToken) return;
         containerRef.value.innerHTML = svg;
         if (bindFunctions) bindFunctions(containerRef.value);
-        // Add cursor: pointer affordance to clickable nodes
-        containerRef.value.querySelectorAll('.node[id]').forEach(el => {
-          if (el.style) el.style.cursor = el.querySelector('a, [onclick]') ? 'pointer' : '';
-        });
+        attachHoverHandlers();
       } catch (e) {
         error.value = String(e?.message || e);
       } finally {
@@ -1269,7 +1372,7 @@ const DiagramView = {
       if (renderDebounce) clearTimeout(renderDebounce);
     });
 
-    return { containerRef, direction, maxDepth, liveUpdate, error, source, rendering, copySource, downloadSvg, render };
+    return { containerRef, direction, maxDepth, liveUpdate, error, source, rendering, tooltip, buildTooltipHtml, copySource, downloadSvg, render };
   },
   template: `
     <div class="dg-wrap">
@@ -1291,6 +1394,9 @@ const DiagramView = {
       </div>
       <div v-if="error" class="dg-error">Mermaid error: {{ error }}</div>
       <div ref="containerRef" class="dg-svg"></div>
+      <div v-if="tooltip.visible" class="dg-tip"
+           :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
+           v-html="buildTooltipHtml(tooltip.data)"></div>
     </div>
   `
 };
