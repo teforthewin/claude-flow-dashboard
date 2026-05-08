@@ -1,0 +1,11 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+    name: claude-flow-dashboard
+    description: Claude Code session visualizer — real-time desktop app for monitoring agent sessions, token usage, and multi-agent teams
+    annotations:
+        github.com/project-slug: easyparkgroup/claude-flow-dashboard
+spec:
+    type: service
+    lifecycle: production
+    owner: test-enablement
