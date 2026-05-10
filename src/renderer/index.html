@@ -78,7 +78,14 @@ input, select { font-family: inherit; }
 .topbar__logo span { color: var(--agent); }
 .topbar__session {
   font-size: 11px; color: var(--text-3); font-family: var(--font-mono);
+  cursor: pointer; padding: 2px 6px; border-radius: 3px;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: background .12s, color .12s;
 }
+.topbar__session:hover { background: var(--bg-2); color: var(--text-2); }
+.copy-icon { font-size: 10px; opacity: .6; }
+.topbar__session:hover .copy-icon,
+.session-title-bar__id:hover .copy-icon { opacity: 1; }
 .topbar__live {
   display: flex; align-items: center; gap: 5px; font-size: 10px;
   font-weight: 600; margin-left: auto;
@@ -606,6 +613,21 @@ input, select { font-family: inherit; }
 }
 .sess:hover .sess__del { opacity: 1; }
 .sess__del:hover { background: #fef2f2; color: var(--red); }
+.sess__copy {
+  opacity: 0; margin-left: auto; flex-shrink: 0;
+  width: 18px; height: 18px; border-radius: 4px;
+  border: none; background: transparent; color: var(--text-3);
+  cursor: pointer; font-size: 11px; display: flex;
+  align-items: center; justify-content: center;
+  transition: all .12s;
+}
+.sess:hover .sess__copy { opacity: 1; }
+.sess__copy:hover { background: #ede9fe; color: var(--agent); }
+.sess--child .sess__copy { margin-left: auto; }
+/* When both copy + delete are present, only the first gets margin-left:auto */
+.sess__copy + .sess__del { margin-left: 2px; }
+.session-title-bar__id { cursor: pointer; }
+.session-title-bar__id:hover { color: var(--text-2); }
 .sess__check {
   width: 14px; height: 14px; accent-color: var(--agent); flex-shrink: 0;
   cursor: pointer; margin-right: -2px;
@@ -658,8 +680,29 @@ input, select { font-family: inherit; }
   padding: 12px 16px; background: #fef2f2; color: #991b1b;
   border-bottom: 1px solid #fecaca; font-size: 12px; font-family: ui-monospace, monospace;
 }
-.dg-svg { flex: 1; overflow: auto; padding: 16px; }
-.dg-svg svg { display: block; margin: 0 auto; max-width: none; height: auto; }
+.dg-viewport {
+  flex: 1; overflow: hidden; position: relative;
+  background: var(--bg);
+  cursor: grab;
+}
+.dg-viewport--panning { cursor: grabbing; }
+.dg-svg {
+  position: absolute; top: 0; left: 0;
+  padding: 16px;
+  will-change: transform;
+}
+.dg-svg svg { display: block; max-width: none; height: auto; }
+.dg-zoom {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 4px; padding-left: 8px; border-left: 1px solid var(--border);
+}
+.dg-zoom__pct {
+  font-size: 11px; font-family: var(--font-mono); color: var(--text-2);
+  min-width: 40px; text-align: center;
+}
+.dg-btn--icon {
+  min-width: 22px; padding: 2px 6px; font-weight: 700; line-height: 1;
+}
 .dg-svg .clickable, .dg-svg [onclick] { cursor: pointer; }
 .dg-svg .clickable:hover rect, .dg-svg .clickable:hover polygon, .dg-svg .clickable:hover circle { filter: brightness(0.95); }
 .dg-svg g.node:hover > rect, .dg-svg g.node:hover > polygon, .dg-svg g.node:hover > circle,
@@ -969,6 +1012,55 @@ input, select { font-family: inherit; }
   padding: 2px 6px; font-family: var(--font-mono); font-weight: 500;
   white-space: nowrap;
 }
+.skill-groups {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 12px 10px; border-top: 1px solid #ede9fe;
+}
+.skill-group__hdr {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+}
+.skill-group__name {
+  font-size: 10px; font-weight: 700; color: #6d28d9;
+  font-family: var(--font-mono); text-transform: lowercase;
+}
+.skill-group__count {
+  font-size: 9px; color: var(--text-3); font-weight: 500;
+}
+.skill-group__items {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-left: 10px; border-left: 2px solid #ede9fe;
+}
+.skill-group__item {
+  font-size: 10px; color: var(--text-2);
+  font-family: var(--font-mono); line-height: 1.4;
+}
+
+/* ── Skill invoker chain (Diagram / Flow / Events) ───────────────────── */
+.bp-task__invoker {
+  font-size: 9px; color: var(--text-3); font-family: var(--font-mono);
+  margin-top: 2px; line-height: 1.2;
+}
+.bp-task--skillread { border-style: dashed; opacity: 0.92; }
+.bp-task--skillinjected { border-style: dotted; }
+.sl-step__invoker {
+  font-size: 10px; color: var(--text-3); font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.sl-step__invoker-inline {
+  font-size: 9px; color: var(--text-3); font-family: var(--font-mono);
+  margin-left: 6px; padding: 1px 6px; background: rgba(109,40,217,.06);
+  border-radius: 3px;
+}
+.evt-invoker {
+  font-size: 10px; color: var(--text-3); font-family: var(--font-mono);
+  margin-left: 6px;
+}
+.evt-attr-skill {
+  display: inline-block; font-size: 9px; font-weight: 600; color: #6d28d9;
+  background: #ede9fe; border-radius: 3px; padding: 1px 5px;
+  margin-right: 6px; font-family: var(--font-mono); vertical-align: 1px;
+}
+.ltag-skillread, .ltag-skillinjected { background: #ede9fe; color: #6d28d9; }
 
 /* ── Sub-agent flow view ─────────────────────────────────────────────────── */
 .sa-view { width: 100%; display: flex; flex-direction: column; align-items: center; }
@@ -1015,6 +1107,11 @@ input, select { font-family: inherit; }
   font-size: 10px; color: var(--text-2); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono);
   margin-top: 1px;
+}
+.sa-agent-call__skill {
+  font-size: 9px; color: #6d28d9; font-family: var(--font-mono);
+  font-weight: 600; margin-top: 1px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* Arrow connector between agent call and session card */
@@ -1086,6 +1183,7 @@ input, select { font-family: inherit; }
 }
 .tm-card__hdr:hover { background: #ede9fe; }
 .tm-card__agent { font-size: 11px; font-weight: 700; color: #6d28d9; font-family: var(--font-mono); }
+.tm-card__skill { font-size: 9px; font-weight: 600; color: #6d28d9; background: #ede9fe; border-radius: 3px; padding: 1px 5px; font-family: var(--font-mono); }
 .tm-card__live  { font-size: 9px; font-weight: 700; color: var(--green); background: #dcfce7; border-radius: 3px; padding: 1px 5px; }
 .tm-card__stats { color: var(--text-3); font-size: 10px; margin-left: auto; font-family: var(--font-mono); }
 .tm-card__chev  { font-size: 9px; color: #a78bfa; flex-shrink: 0; }
@@ -1387,7 +1485,12 @@ input, select { font-family: inherit; }
   <!-- ═══ Top Bar ═══════════════════════════════════════════════════════════ -->
   <header class="topbar">
     <span class="topbar__logo"><span>Loom</span>Scope</span>
-    <span class="topbar__session" v-if="activeSession">{{ activeSession.length > 28 ? activeSession.slice(0,28)+'...' : activeSession }}</span>
+    <span class="topbar__session" v-if="activeSession"
+          :title="'Click to copy: ' + activeSession"
+          @click="copySessionId(activeSession, $event)">
+      {{ activeSession.length > 28 ? activeSession.slice(0,28)+'...' : activeSession }}
+      <span class="copy-icon">{{ copiedSessionId === activeSession ? '✓' : '⧉' }}</span>
+    </span>
     <button :class="['topbar__refresh', reloading ? 'topbar__refresh--spinning' : '']"
             @click="reloadAll" title="Reload all sessions from disk">&#8635;</button>
     <div :class="['topbar__live', liveConnected ? 'topbar__live--on' : 'topbar__live--off']">
@@ -1449,6 +1552,9 @@ input, select { font-family: inherit; }
                           @click.stop="toggleParentExpand(s.session_id)">
                     {{ expandedParents[s.session_id] ? '▼' : '▶' }} {{ s.child_ids.length }}
                   </button>
+                  <button v-if="!selectMode" class="sess__copy"
+                          @click.stop="copySessionId(s.session_id, $event)"
+                          :title="'Copy session id: ' + s.session_id">{{ copiedSessionId === s.session_id ? '✓' : '⧉' }}</button>
                   <button v-if="!selectMode" class="sess__del" @click.stop="deleteSingleSession(s.session_id)"
                           title="Delete session">&times;</button>
                 </div>
@@ -1463,6 +1569,9 @@ input, select { font-family: inherit; }
                       <span class="sess__child-icon">⤷</span>
                       <span v-if="sessionMap.get(childId).is_active" class="sess__live">LIVE</span>
                       <span class="sess__child-title">{{ sessionMap.get(childId).title || sessionMap.get(childId).agent_description || sessionMap.get(childId).agent_name || timeOf(sessionMap.get(childId).first_ts) }}</span>
+                      <button v-if="!selectMode" class="sess__copy"
+                              @click.stop="copySessionId(childId, $event)"
+                              :title="'Copy session id: ' + childId">{{ copiedSessionId === childId ? '✓' : '⧉' }}</button>
                     </div>
                   </template>
                 </template>
@@ -1519,7 +1628,12 @@ input, select { font-family: inherit; }
       <!-- Session title bar -->
       <div class="session-title-bar" v-if="sessionTitle">
         <span class="session-title-bar__text">{{ sessionTitle }}</span>
-        <span class="session-title-bar__id" v-if="activeSession">{{ activeSession.slice(0, 18) }}…</span>
+        <span class="session-title-bar__id" v-if="activeSession"
+              :title="'Click to copy: ' + activeSession"
+              @click="copySessionId(activeSession, $event)">
+          {{ activeSession.slice(0, 18) }}…
+          <span class="copy-icon">{{ copiedSessionId === activeSession ? '✓' : '⧉' }}</span>
+        </span>
       </div>
       <!-- Stats HUD -->
       <div class="hud" v-if="stats && stats.tokens">
@@ -1613,6 +1727,8 @@ input, select { font-family: inherit; }
                   @click="eventDirFilter.command=!eventDirFilter.command">&#9889; cmd</button>
           <button :class="['filter-toggle', eventDirFilter.prompt ? 'filter-toggle--on' : '']"
                   @click="eventDirFilter.prompt=!eventDirFilter.prompt">&#9997; prompt</button>
+          <button :class="['filter-toggle', eventSkillsOnly ? 'filter-toggle--on' : '']"
+                  @click="eventSkillsOnly=!eventSkillsOnly" title="Show only Skill / SkillRead / SkillInjected / SkillListing events">&#9881; skills only</button>
         </div>
         <div class="events-table" ref="eventsTable">
           <table>
@@ -1629,14 +1745,34 @@ input, select { font-family: inherit; }
                   <td class="evt-time">{{ e.ts ? e.ts.slice(11,19) : '' }}</td>
                   <td class="evt-dir">{{ e.event==='pre' ? '\u2192' : e.event==='prompt' ? '\u270D' : e.event==='command' ? '\u26A1' : '\u2190' }}</td>
                   <td class="evt-tool" :style="e.event==='post' ? { opacity: '0.5' } : {}">{{ e.event==='post' ? resolvePostTool(e) : e.tool }}</td>
-                  <td class="evt-summary" :title="summarise(e)">{{ summarise(e) }}</td>
+                  <td class="evt-summary" :title="summarise(e)">
+                    <span v-if="e.attribution && e.attribution.skill" class="evt-attr-skill" :title="'Skill: '+e.attribution.skill+(e.attribution.agent ? '\\nAgent: '+e.attribution.agent : '')">&#x1F9E9; {{ e.attribution.skill }}</span>
+                    {{ summarise(e) }}
+                    <span v-if="isSkillEvent(e.tool) && invokerChainFor(e)" class="evt-invoker">· by: {{ invokerChainFor(e).join(' › ') }}</span>
+                  </td>
                   <td class="evt-tokens">
                     <span v-if="e.tokens?.input" class="t-in">&uarr;{{ fmtK(e.tokens.input) }}</span>
                     <span v-if="e.tokens?.output" class="t-out"> &darr;{{ fmtK(e.tokens.output) }}</span>
                   </td>
                 </tr>
                 <tr v-if="openResps[e._idx]" class="evt-resp">
-                  <td colspan="5"><div class="evt-resp__body"><pre>{{ fmtResp(e.response) }}</pre></div></td>
+                  <td colspan="5">
+                    <div v-if="e.tool === 'SkillListing' && e.input && e.input.skills && e.input.skills.length"
+                         class="evt-resp__body">
+                      <div class="skill-groups" style="border-top:none;padding:6px 0">
+                        <div v-for="g in groupSkills(e.input.skills)" :key="g.plugin" class="skill-group">
+                          <div class="skill-group__hdr">
+                            <span class="skill-group__name">{{ g.plugin }}</span>
+                            <span class="skill-group__count">({{ g.items.length }})</span>
+                          </div>
+                          <div class="skill-group__items">
+                            <div v-for="it in g.items" :key="it" class="skill-group__item">{{ it }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="evt-resp__body"><pre>{{ fmtResp(e.response) }}</pre></div>
+                  </td>
                 </tr>
               </template>
               <tr v-if="!filteredEvents.length">

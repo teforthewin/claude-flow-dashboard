@@ -13,6 +13,47 @@ function fmtCostSmall(n) { return '$' + (n >= 0.001 ? n.toFixed(3) : n.toFixed(4
 
 const CONTAINER_TOOLS = new Set(['Agent', 'Skill', 'Bash']);
 
+// Walk a built tree node up via parentId in nodeMap, returning the chain of
+// Agent labels from root → leaf. "main" if no Agent ancestor.
+function computeInvokerChain(node, nodeMap) {
+  const chain = [];
+  let cur = node;
+  let safety = 50;
+  while (cur && cur.parentId && safety-- > 0) {
+    const par = nodeMap.get(cur.parentId);
+    if (!par) break;
+    if (par.tool === 'Agent') {
+      const i = par.input || {};
+      const type = i.subagent_type || i.agent || 'general-purpose';
+      const desc = i.description ? ` (${String(i.description).slice(0, 30)})` : '';
+      chain.unshift(`${type}${desc}`);
+    }
+    cur = par;
+  }
+  if (!chain.length) chain.push('main');
+  return chain;
+}
+
+function isSkillEvent(tool) {
+  return tool === 'Skill' || tool === 'SkillRead' || tool === 'SkillInjected' || tool === 'SkillListing';
+}
+
+// Group flat skill names ("plugin:skill" or "skill") into [{plugin, items:[...]}]
+function groupSkills(skills) {
+  if (!Array.isArray(skills) || !skills.length) return [];
+  const map = new Map();
+  for (const s of skills) {
+    const idx = s.indexOf(':');
+    const plugin = idx > -1 ? s.slice(0, idx) : '(builtin)';
+    const name = idx > -1 ? s.slice(idx + 1) : s;
+    if (!map.has(plugin)) map.set(plugin, []);
+    map.get(plugin).push(name);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([plugin, items]) => ({ plugin, items: items.sort() }));
+}
+
 function getLabel(node) {
   if (node.cmd) return node.cmd;
   const i = node.input || {};
@@ -24,12 +65,16 @@ function getLabel(node) {
     case 'TaskUpdate':  return `${i.id||''} → ${i.status||''}`;
     case 'Read': case 'Glob': case 'Grep':
       return (i.file_path||i.path||i.pattern||'').split('/').slice(-2).join('/');
+    case 'WebFetch': return String(i.url||'').replace(/^https?:\/\//,'').slice(0,80);
+    case 'WebSearch': return String(i.query||'').slice(0,80);
     case 'Bash': return i.description || (i.command||'').slice(0,80) || '';
     case 'Edit': case 'Write': return (i.file_path||'').split('/').slice(-2).join('/');
     case 'Command': return `${i.command||''} ${i.args||''}`.trim();
     case 'User': return (i.message||'').slice(0,120);
     case 'AgentSetting': return String(i.skill||'');
     case 'SkillListing': return `${i.skillCount ?? 0} skills loaded`;
+    case 'SkillRead': return `${i.plugin||''}:${i.skill||''}`;
+    case 'SkillInjected': return String(i.skill || node.cmd || '');
     default:
       if (node.tool?.startsWith('mcp__')) return node.tool.replace(/^mcp__[^_]+__/, '');
       return '';
@@ -43,6 +88,7 @@ function getDescription(node) {
   if (node.tool === 'SendMessage' && i.message) return String(i.message).slice(0, 200);
   if (node.tool === 'Bash' && i.command) return String(i.command).slice(0, 200);
   if (node.tool === 'Command' && i.args) return i.args;
+  if (node.tool === 'WebFetch' && i.prompt) return String(i.prompt).slice(0, 200);
   return '';
 }
 
@@ -82,7 +128,8 @@ function leafTagClass(tool) {
               Edit:'ltag-edit', Write:'ltag-write', Skill:'ltag-skill',
               SendMessage:'ltag-sendmessage', TaskCreate:'ltag-taskcreate',
               TaskUpdate:'ltag-taskupdate', Command:'ltag-command', User:'ltag-user',
-              AgentSetting:'ltag-agentsetting', SkillListing:'ltag-skilllisting' };
+              AgentSetting:'ltag-agentsetting', SkillListing:'ltag-skilllisting',
+              SkillRead:'ltag-skill', SkillInjected:'ltag-skill' };
   return m[tool] || 'ltag-default';
 }
 
@@ -94,6 +141,10 @@ function buildTree(entries) {
   const hasParentIds = entries.some(e => e.parent_id);
   if (hasParentIds) _buildById(entries, root, nodeMap);
   else _buildHeuristic(entries, root, nodeMap);
+  // Annotate skill-related nodes with the full invoker chain (root → leaf).
+  for (const node of nodeMap.values()) {
+    if (isSkillEvent(node.tool)) node.invokerChain = computeInvokerChain(node, nodeMap);
+  }
   return { root, nodeMap };
 }
 
@@ -200,7 +251,7 @@ function _buildHeuristic(entries, root, nodeMap) {
 }
 
 // ─── Step Grouping ───────────────────────────────────────────────────────
-const SOLO_TOOLS = new Set(['User', 'Command', 'SkillListing', 'AgentSetting']);
+const SOLO_TOOLS = new Set(['User', 'Command', 'SkillListing', 'AgentSetting', 'SkillInjected']);
 const PARALLEL_GAP_MS = 10000;
 
 function isOrch(node) {
@@ -783,7 +834,7 @@ const ProcessNode = {
     function taskClass(tool) {
       if (!tool) return 'bp-task--default';
       if (tool === 'Agent') return 'bp-task--agent';
-      if (tool === 'Skill' || tool === 'AgentSetting') return 'bp-task--skill';
+      if (tool === 'Skill' || tool === 'AgentSetting' || tool === 'SkillRead' || tool === 'SkillInjected') return 'bp-task--skill';
       if (tool === 'User' || tool === 'Command') return 'bp-task--user';
       if (tool === 'Bash') return 'bp-task--bash';
       if (tool === 'Read' || tool === 'Glob' || tool === 'Grep') return 'bp-task--read';
@@ -798,6 +849,8 @@ const ProcessNode = {
       if (tool === 'Skill') return 'S';
       if (tool === 'AgentSetting') return '⚙';
       if (tool === 'SkillListing') return '⚙';
+      if (tool === 'SkillRead') return '📖';
+      if (tool === 'SkillInjected') return '⤓';
       if (tool === 'User' || tool === 'Command') return '✍';
       if (tool === 'Bash') return '$';
       if (tool === 'Read' || tool === 'Glob' || tool === 'Grep') return '⚐';
@@ -831,7 +884,8 @@ const ProcessNode = {
       return groups;
     });
 
-    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, label, desc, taskClass, toolIcon, childGroups, childTree };
+    const skillGroups = computed(() => groupSkills(props.node.input?.skills));
+    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, skillGroups, label, desc, taskClass, toolIcon, childGroups, childTree };
   },
   template: `
     <div class="bp-flow">
@@ -843,6 +897,7 @@ const ProcessNode = {
           </div>
           <span class="bp-subprocess__name">{{ label }}</span>
           <span v-if="desc" class="bp-subprocess__desc">{{ desc }}</span>
+          <span v-if="isSkill && node.invokerChain && node.invokerChain.length" class="bp-task__invoker" style="margin-left:8px">by: {{ node.invokerChain.join(' › ') }}</span>
           <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF; RUNNING</span>
         </div>
         <div class="bp-subprocess__body">
@@ -878,15 +933,25 @@ const ProcessNode = {
             <div class="bp-task__label">{{ node.input.skillCount }} skills &nbsp;<span style="color:var(--text-3);font-size:10px">{{ skillsOpen ? '▼' : '▶' }}</span></div>
           </div>
         </div>
-        <div v-if="skillsOpen && node.input.skills && node.input.skills.length" class="bp-skill-pills">
-          <span v-for="s in node.input.skills" :key="s" class="bp-skill-pill">{{ s }}</span>
+        <div v-if="skillsOpen && skillGroups.length" class="skill-groups" @click.stop>
+          <div v-for="g in skillGroups" :key="g.plugin" class="skill-group">
+            <div class="skill-group__hdr">
+              <span class="skill-group__name">{{ g.plugin }}</span>
+              <span class="skill-group__count">({{ g.items.length }})</span>
+            </div>
+            <div class="skill-group__items">
+              <div v-for="it in g.items" :key="it" class="skill-group__item">{{ it }}</div>
+            </div>
+          </div>
         </div>
       </div>
-      <div v-else :class="['bp-task', taskClass(node.tool)]" :title="label">
+      <div v-else :class="['bp-task', taskClass(node.tool), node.tool==='SkillRead'?'bp-task--skillread':'', node.tool==='SkillInjected'?'bp-task--skillinjected':'']"
+           :title="label + (node.invokerChain ? '\\nInvoked by: ' + node.invokerChain.join(' › ') : '') + (node.ts ? '\\nat: ' + node.ts.slice(11,19) : '')">
         <div class="bp-task__icon">{{ toolIcon(node.tool) }}</div>
         <div class="bp-task__body">
           <div v-if="node.tool !== 'User' && node.tool !== 'Command'" class="bp-task__type">{{ node.tool }}</div>
           <div class="bp-task__label">{{ label || node.cmd || '—' }}</div>
+          <div v-if="node.invokerChain && node.invokerChain.length" class="bp-task__invoker">by: {{ node.invokerChain.join(' › ') }}</div>
         </div>
         <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF;</span>
       </div>
@@ -950,6 +1015,7 @@ const SubAgentFlowView = {
             <div class="sa-agent-call__icon">A</div>
             <div class="sa-agent-call__body">
               <div class="sa-agent-call__type">{{ item.agentType }}</div>
+              <div v-if="item.sess.info?.attribution_skill" class="sa-agent-call__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ item.sess.info.attribution_skill }}</div>
               <div v-if="item.label" class="sa-agent-call__label" :title="item.label">{{ item.label }}</div>
             </div>
             <span v-if="item.sess.info?.is_active" class="n-agent__status n-agent__status--active" style="font-size:8px">LIVE</span>
@@ -1006,6 +1072,7 @@ const TeamView = {
              :class="['tm-card', expanded.has(s.id) ? 'tm-card--expanded' : '']">
           <div class="tm-card__hdr" @click="toggle(s.id)">
             <span class="tm-card__agent">{{ s.info.agent_name || s.info.agent_description || 'Sub-agent' }}</span>
+            <span v-if="s.info.attribution_skill" class="tm-card__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ s.info.attribution_skill }}</span>
             <span v-if="s.info.is_active" class="tm-card__live">LIVE</span>
             <span class="tm-card__stats">{{ s.info.event_count }}ev</span>
             <button class="tm-card__nav" @click="navigate(s.id, $event)" title="Open this session">&#x2197;</button>
@@ -1065,7 +1132,7 @@ const StepLane = {
       return i.agent || i.subagent_type || 'general-purpose';
     }
     return { steps, toggle, isOpen, stepNum, navigate, agentChildSession, agentChildSessionId,
-             aggregate, getLabelFor, getDescFor, agentType, fmtT, fmtK, fmtDur };
+             aggregate, getLabelFor, getDescFor, agentType, groupSkills, fmtT, fmtK, fmtDur };
   },
   template: `
     <div class="sl-lane">
@@ -1076,12 +1143,30 @@ const StepLane = {
         <div v-if="s.kind==='solo'" class="sl-step sl-step--solo">
           <div class="sl-step__num">{{ stepNum(i) }}</div>
           <div class="sl-step__body">
-            <div class="sl-step__hdr">
+            <div class="sl-step__hdr"
+                 :style="s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length ? 'cursor:pointer' : ''"
+                 @click="s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length ? toggle('s'+i) : null">
               <span class="sl-tag" :class="'ltag-'+s.nodes[0].tool.toLowerCase()">{{ s.nodes[0].tool }}</span>
               <span class="sl-step__title">{{ getLabelFor(s.nodes[0]) || '—' }}</span>
               <span class="sl-step__time">{{ fmtT(s.nodes[0].ts) }}</span>
+              <span v-if="s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length"
+                    class="sl-step__chev">{{ isOpen('s'+i) ? '▼' : '▶' }}</span>
             </div>
             <div v-if="getDescFor(s.nodes[0])" class="sl-step__desc">{{ getDescFor(s.nodes[0]) }}</div>
+            <div v-if="s.nodes[0].invokerChain && s.nodes[0].invokerChain.length"
+                 class="sl-step__invoker">by: {{ s.nodes[0].invokerChain.join(' › ') }}</div>
+            <div v-if="s.nodes[0].tool==='SkillListing' && isOpen('s'+i) && s.nodes[0].input?.skills?.length"
+                 class="skill-groups" style="border-top:none;padding:6px 0">
+              <div v-for="g in groupSkills(s.nodes[0].input.skills)" :key="g.plugin" class="skill-group">
+                <div class="skill-group__hdr">
+                  <span class="skill-group__name">{{ g.plugin }}</span>
+                  <span class="skill-group__count">({{ g.items.length }})</span>
+                </div>
+                <div class="skill-group__items">
+                  <div v-for="it in g.items" :key="it" class="skill-group__item">{{ it }}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1119,6 +1204,8 @@ const StepLane = {
               <span class="sl-step__kind">{{ s.nodes[0].tool === 'Skill' ? 'SKILL' : 'SUB-AGENT' }}</span>
               <span class="sl-step__title">{{ getLabelFor(s.nodes[0]) }}</span>
               <span v-if="getDescFor(s.nodes[0])" class="sl-step__desc-inline">— {{ getDescFor(s.nodes[0]) }}</span>
+              <span v-if="s.nodes[0].tool==='Skill' && s.nodes[0].invokerChain && s.nodes[0].invokerChain.length"
+                    class="sl-step__invoker-inline">by: {{ s.nodes[0].invokerChain.join(' › ') }}</span>
               <span class="sl-step__meta">
                 <span v-if="aggregate(s.nodes).span" class="sl-meta__dur">{{ fmtDur(aggregate(s.nodes).span) }}</span>
                 <span v-if="s.nodes[0].status==='active'" class="sl-live">● LIVE</span>
@@ -1231,14 +1318,100 @@ const DiagramView = {
   },
   setup(props) {
     const containerRef = ref(null);
+    const viewportRef = ref(null);
     const direction = ref('TD');
     const maxDepth = ref(3);
     const liveUpdate = ref(false);
     const error = ref('');
     const source = ref('');
     const rendering = ref(false);
+    const zoom = ref(1);
+    const pan = ref({ x: 0, y: 0 });
+    const panning = ref(false);
+    let panStart = { x: 0, y: 0, panX: 0, panY: 0 };
     let renderToken = 0;
     let renderDebounce = null;
+
+    const ZOOM_MIN = 0.2;
+    const ZOOM_MAX = 4;
+    function clampZoom(z) { return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)); }
+
+    function zoomAt(clientX, clientY, factor) {
+      if (!viewportRef.value) return;
+      const rect = viewportRef.value.getBoundingClientRect();
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
+      const newZoom = clampZoom(zoom.value * factor);
+      const realFactor = newZoom / zoom.value;
+      pan.value = {
+        x: mx - (mx - pan.value.x) * realFactor,
+        y: my - (my - pan.value.y) * realFactor,
+      };
+      zoom.value = newZoom;
+    }
+
+    function onWheel(ev) {
+      ev.preventDefault();
+      const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+      zoomAt(ev.clientX, ev.clientY, factor);
+    }
+
+    function onMouseDown(ev) {
+      // Only left-button drags on empty canvas (let nodes still receive clicks via stopPropagation in svg handlers)
+      if (ev.button !== 0) return;
+      panning.value = true;
+      tooltip.value = { visible: false, x: 0, y: 0, data: null };
+      panStart = { x: ev.clientX, y: ev.clientY, panX: pan.value.x, panY: pan.value.y };
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    }
+    function onMouseMove(ev) {
+      if (!panning.value) return;
+      pan.value = {
+        x: panStart.panX + (ev.clientX - panStart.x),
+        y: panStart.panY + (ev.clientY - panStart.y),
+      };
+    }
+    function onMouseUp() {
+      panning.value = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    }
+
+    function zoomIn() {
+      const r = viewportRef.value?.getBoundingClientRect();
+      if (r) zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2);
+    }
+    function zoomOut() {
+      const r = viewportRef.value?.getBoundingClientRect();
+      if (r) zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
+    }
+    function resetView() {
+      zoom.value = 1;
+      pan.value = { x: 0, y: 0 };
+    }
+    function fitToView() {
+      if (!viewportRef.value || !containerRef.value) return;
+      const svg = containerRef.value.querySelector('svg');
+      if (!svg) return;
+      const vp = viewportRef.value.getBoundingClientRect();
+      // Reset transform briefly to measure natural size
+      const prevTransform = containerRef.value.style.transform;
+      containerRef.value.style.transform = 'translate(0px, 0px) scale(1)';
+      const bbox = svg.getBoundingClientRect();
+      containerRef.value.style.transform = prevTransform;
+      if (!bbox.width || !bbox.height) return;
+      const pad = 24;
+      const z = clampZoom(Math.min(
+        (vp.width - pad * 2) / bbox.width,
+        (vp.height - pad * 2) / bbox.height,
+      ));
+      zoom.value = z;
+      pan.value = {
+        x: (vp.width - bbox.width * z) / 2,
+        y: (vp.height - bbox.height * z) / 2,
+      };
+    }
 
     // Expose navigation function for Mermaid click directives.
     // Re-bound every render so the latest onNavigate handler is used.
@@ -1364,15 +1537,21 @@ const DiagramView = {
     }
 
     onMounted(() => render());
-    watch(() => [direction.value, maxDepth.value], () => render());
+    watch(() => [direction.value, maxDepth.value], () => { resetView(); render(); });
     watch(() => props.tree, () => { if (liveUpdate.value) scheduleRender(); else render(); });
 
     onUnmounted(() => {
       if (window.__loomNavigate) delete window.__loomNavigate;
       if (renderDebounce) clearTimeout(renderDebounce);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
     });
 
-    return { containerRef, direction, maxDepth, liveUpdate, error, source, rendering, tooltip, buildTooltipHtml, copySource, downloadSvg, render };
+    return {
+      containerRef, viewportRef, direction, maxDepth, liveUpdate, error, source, rendering,
+      tooltip, buildTooltipHtml, copySource, downloadSvg, render,
+      zoom, pan, panning, onWheel, onMouseDown, zoomIn, zoomOut, resetView, fitToView,
+    };
   },
   template: `
     <div class="dg-wrap">
@@ -1390,10 +1569,23 @@ const DiagramView = {
         <button class="dg-btn" @click="render">Refresh</button>
         <button class="dg-btn" @click="copySource">Copy source</button>
         <button class="dg-btn" @click="downloadSvg">Download SVG</button>
+        <span class="dg-zoom">
+          <button class="dg-btn dg-btn--icon" @click="zoomOut" title="Zoom out (wheel down)">&minus;</button>
+          <span class="dg-zoom__pct">{{ Math.round(zoom * 100) }}%</span>
+          <button class="dg-btn dg-btn--icon" @click="zoomIn" title="Zoom in (wheel up)">+</button>
+          <button class="dg-btn" @click="fitToView" title="Fit to view">Fit</button>
+          <button class="dg-btn" @click="resetView" title="Reset to 100%">Reset</button>
+        </span>
         <span v-if="rendering" class="dg-status">rendering…</span>
       </div>
       <div v-if="error" class="dg-error">Mermaid error: {{ error }}</div>
-      <div ref="containerRef" class="dg-svg"></div>
+      <div ref="viewportRef"
+           :class="['dg-viewport', panning ? 'dg-viewport--panning' : '']"
+           @wheel="onWheel"
+           @mousedown="onMouseDown">
+        <div ref="containerRef" class="dg-svg"
+             :style="{ transform: 'translate(' + pan.x + 'px, ' + pan.y + 'px) scale(' + zoom + ')', transformOrigin: '0 0' }"></div>
+      </div>
       <div v-if="tooltip.visible" class="dg-tip"
            :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
            v-html="buildTooltipHtml(tooltip.data)"></div>
@@ -1466,6 +1658,7 @@ const app = createApp({
     const eventSearch = ref('');
     const eventToolFilter = ref('');
     const eventDirFilter = reactive({ pre: true, post: true, command: true, prompt: true });
+    const eventSkillsOnly = ref(false);
     const openResps = reactive({});
     const collapsedProjects = reactive({});
     const selectMode = ref(false);
@@ -1810,6 +2003,26 @@ const app = createApp({
       else expandedParents[id] = true;
     }
 
+    const copiedSessionId = ref('');
+    let copiedTimer = null;
+    async function copySessionId(id, ev) {
+      ev?.stopPropagation?.();
+      ev?.preventDefault?.();
+      if (!id) return;
+      try {
+        await navigator.clipboard.writeText(id);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = id; ta.style.position='fixed'; ta.style.opacity='0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch {}
+        document.body.removeChild(ta);
+      }
+      copiedSessionId.value = id;
+      if (copiedTimer) clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => { copiedSessionId.value = ''; }, 1500);
+    }
+
     const activeParentSession = computed(() => {
       if (!activeSession.value) return null;
       const info = sessionMap.value.get(activeSession.value);
@@ -1845,9 +2058,23 @@ const app = createApp({
     function timeOf(ts) { return ts ? ts.slice(11,16) : '--:--'; }
 
     const availableTools = computed(() => { const s=new Set(); for (const e of entries.value) if (e.tool) s.add(e.tool); return [...s].sort(); });
+    // Map action_id → invokerChain (computed from current tree)
+    const invokerChainIndex = computed(() => {
+      const m = new Map();
+      if (!treeData.value?.nodeMap) return m;
+      for (const n of treeData.value.nodeMap.values()) {
+        if (n.invokerChain && n.id) m.set(n.id, n.invokerChain);
+      }
+      return m;
+    });
+    function invokerChainFor(e) {
+      return invokerChainIndex.value.get(e.action_id) || null;
+    }
     const filteredEvents = computed(() => {
       const q = eventSearch.value.toLowerCase().trim();
+      const skillsOnly = eventSkillsOnly.value;
       return entries.value.map((e,i)=>({...e,_idx:i})).filter(e => {
+        if (skillsOnly && !isSkillEvent(e.tool)) return false;
         if (!eventDirFilter[e.event]) return false;
         if (eventToolFilter.value && e.tool!==eventToolFilter.value) return false;
         if (q) { const s=summarise(e).toLowerCase(), t=(e.tool||'').toLowerCase(); if (!s.includes(q)&&!t.includes(q)) return false; }
@@ -1884,11 +2111,15 @@ const app = createApp({
         case 'TaskUpdate': return `${i.id||''} → ${i.status||''}`;
         case 'Bash': return i.description || (i.command||'').slice(0,80);
         case 'Read': case 'Glob': case 'Grep': return (i.path||i.file_path||i.pattern||'').split('/').slice(-3).join('/');
+        case 'WebFetch': return String(i.url||'').replace(/^https?:\/\//,'') + (i.prompt?` — ${String(i.prompt).slice(0,60)}`:'');
+        case 'WebSearch': return String(i.query||'');
         case 'Edit': case 'Write': return (i.file_path||'').split('/').slice(-3).join('/');
         case 'Command': return `${i.command||''} ${i.args||''}`.trim();
         case 'User': return (i.message||'').slice(0,120);
         case 'AgentSetting': return `skill: ${i.skill||''}`;
         case 'SkillListing': return `${i.skillCount ?? 0} skills available`;
+        case 'SkillRead': return `read SKILL.md → ${i.plugin||''}:${i.skill||''}`;
+        case 'SkillInjected': return `/${i.skill||e.cmd||''} (injected)`;
         default:
           if (e.tool?.startsWith('mcp__')) return e.tool.replace(/^mcp__[^_]+__/, '');
           return JSON.stringify(i).slice(0,100);
@@ -2099,17 +2330,18 @@ const app = createApp({
 
     return { sidebarWidth, sidebarDragging, startSidebarResize,
              sessions, activeSession, entries, stats, liveConnected, reloading, reloadAll, tab, autoScroll,
-             sessionSearch, eventSearch, eventToolFilter, eventDirFilter, openResps,
+             sessionSearch, eventSearch, eventToolFilter, eventDirFilter, eventSkillsOnly, invokerChainFor, isSkillEvent, openResps,
              collapsedProjects, eventsTable, searchInput,
              tree, tokenIndex, topTools, estimatedCost, sessionDuration,
              filteredProjectGroups, filteredEvents, availableTools,
-             groupByDate, timeOf, fmtK, fmtT, summarise, fmtResp, toolClass,
+             groupByDate, timeOf, fmtK, fmtT, summarise, fmtResp, toolClass, groupSkills,
              selectSession, toggleProject, toggleEventResp,
              selectMode, selectedSessions, toggleSelectMode,
              toggleSessionSelect, selectAllVisible, isProjectFullySelected, isProjectPartiallySelected, toggleProjectSelect,
              deleteSingleSession, deleteSelectedSessions,
              archiveSelectedSessions,
              sessionMap, expandedParents, toggleParentExpand, activeParentSession,
+             copySessionId, copiedSessionId,
              showRawLog, rawPanelWidth, rawDragging, rawPanel, rawLines, openRawLines,
              startRawResize, toggleRawLine,
              sessionTitle,

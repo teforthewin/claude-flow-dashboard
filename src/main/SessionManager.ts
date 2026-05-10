@@ -19,6 +19,9 @@ export interface SessionState {
   title: string;
   teamName: string;
   agentName: string;
+  attributionSkill: string;
+  attributionAgent: string;
+  attributionPlugin: string;
 }
 
 export interface SessionInfo {
@@ -34,6 +37,9 @@ export interface SessionInfo {
   title: string;
   team_name: string;
   agent_name: string;
+  attribution_skill: string;
+  attribution_agent: string;
+  attribution_plugin: string;
 }
 
 function getProjectName(dirName: string): string {
@@ -179,6 +185,9 @@ export class SessionManager extends EventEmitter {
       title,
       teamName: result.teamName,
       agentName: result.agentName,
+      attributionSkill: result.attributionSkill,
+      attributionAgent: result.attributionAgent,
+      attributionPlugin: result.attributionPlugin,
     };
     this.sessions.set(sessionId, state);
 
@@ -208,6 +217,9 @@ export class SessionManager extends EventEmitter {
     state.entries = [...state.entries, ...result.entries];
     state.stats = mergeStats(state.stats, result.stats);
     state.lastLine = result.lastLine;
+    if (!state.attributionSkill && result.attributionSkill) state.attributionSkill = result.attributionSkill;
+    if (!state.attributionAgent && result.attributionAgent) state.attributionAgent = result.attributionAgent;
+    if (!state.attributionPlugin && result.attributionPlugin) state.attributionPlugin = result.attributionPlugin;
     if (!state.title) {
       const firstPrompt = state.entries.find(e => e.event === 'prompt' && e.tool === 'User');
       state.title = firstPrompt?.cmd || result.agentSetting || result.agentName || '';
@@ -238,6 +250,9 @@ export class SessionManager extends EventEmitter {
         title: state.title,
         team_name: state.teamName,
         agent_name: state.agentName,
+        attribution_skill: state.attributionSkill,
+        attribution_agent: state.attributionAgent,
+        attribution_plugin: state.attributionPlugin,
       });
     }
     return list.sort((a, b) => b.last_ts.localeCompare(a.last_ts));

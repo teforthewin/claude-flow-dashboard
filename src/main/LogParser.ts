@@ -18,6 +18,8 @@ export interface AppEntry {
   input: Record<string, unknown>;
   tokens: TokenCounts | null;
   response?: unknown;
+  skillRead?: { plugin: string; name: string } | null;
+  attribution?: { skill: string; agent: string; plugin: string } | null;
 }
 
 export interface TimelineEntry {
@@ -46,6 +48,9 @@ export interface ParseResult {
   agentName: string;
   teamName: string;
   teamTask: string;
+  attributionSkill: string;
+  attributionAgent: string;
+  attributionPlugin: string;
 }
 
 interface NativeContentBlock {
@@ -82,6 +87,9 @@ interface NativeEntry {
   agentSetting?: string;
   agentName?: string;
   teamName?: string;
+  attributionSkill?: string;
+  attributionAgent?: string;
+  attributionPlugin?: string;
   attachment?: {
     type: string;
     content?: string;
@@ -90,6 +98,30 @@ interface NativeEntry {
     hookName?: string;
     toolUseID?: string;
   };
+}
+
+function detectSkillRead(input: Record<string, unknown>): { plugin: string; name: string } | null {
+  const path = String(input.file_path || input.path || '');
+  if (!path) return null;
+  const m = path.match(/skills\/([^/]+)\/SKILL\.md$/i);
+  if (!m) return null;
+  const folder = m[1];
+  const dash = folder.indexOf('-');
+  if (dash > -1) return { plugin: folder.slice(0, dash), name: folder.slice(dash + 1) };
+  return { plugin: folder, name: folder };
+}
+
+// A real skill activation has the plugin:skill form (e.g. /input-analyzer:input-analyzer).
+// Bare slash commands like /plugin, /reload-plugins, /clear are built-in Claude Code
+// commands, not skills — exclude them.
+function detectInjectedSkills(text: string): Array<{ name: string; raw: string }> {
+  const out: Array<{ name: string; raw: string }> = [];
+  for (const m of text.matchAll(/<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/g)) {
+    const name = m[1];
+    if (!name.includes(':')) continue;
+    out.push({ name, raw: m[0] });
+  }
+  return out;
 }
 
 function buildCmd(tool: string, input: Record<string, unknown>): string {
@@ -110,6 +142,10 @@ function buildCmd(tool: string, input: Record<string, unknown>): string {
     case 'Glob':
     case 'Grep':
       return String(input.file_path || input.path || input.pattern || '').split('/').slice(-2).join('/');
+    case 'WebFetch':
+      return String(input.url || '').replace(/^https?:\/\//, '').slice(0, 80);
+    case 'WebSearch':
+      return String(input.query || '').slice(0, 80);
     case 'Edit':
     case 'Write':
       return String(input.file_path || '').split('/').slice(-2).join('/');
@@ -138,7 +174,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   try {
     lines = fs.readFileSync(filePath, 'utf-8').split('\n');
   } catch {
-    return { entries: [], stats: emptyStats(), lastLine: fromLine, agentSetting: '', agentName: '', teamName: '', teamTask: '' };
+    return { entries: [], stats: emptyStats(), lastLine: fromLine, agentSetting: '', agentName: '', teamName: '', teamTask: '', attributionSkill: '', attributionAgent: '', attributionPlugin: '' };
   }
 
   const entries: AppEntry[] = [];
@@ -148,6 +184,9 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   let sessionAgentName = '';
   let sessionTeamName = '';
   let sessionTeamTask = '';
+  let sessionAttributionSkill = '';
+  let sessionAttributionAgent = '';
+  let sessionAttributionPlugin = '';
 
   for (let i = fromLine; i < lines.length; i++) {
     const raw = lines[i].trim();
@@ -164,6 +203,17 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
     // Capture team/agent metadata from any entry type
     if (obj.teamName && !sessionTeamName) sessionTeamName = String(obj.teamName);
     if (obj.agentName && !sessionAgentName) sessionAgentName = String(obj.agentName);
+    if (obj.attributionSkill && !sessionAttributionSkill) sessionAttributionSkill = String(obj.attributionSkill);
+    if (obj.attributionAgent && !sessionAttributionAgent) sessionAttributionAgent = String(obj.attributionAgent);
+    if (obj.attributionPlugin && !sessionAttributionPlugin) sessionAttributionPlugin = String(obj.attributionPlugin);
+
+    const attribution = (obj.attributionSkill || obj.attributionAgent || obj.attributionPlugin)
+      ? {
+          skill: String(obj.attributionSkill || ''),
+          agent: String(obj.attributionAgent || ''),
+          plugin: String(obj.attributionPlugin || ''),
+        }
+      : null;
 
     const ts = obj.timestamp || '';
 
@@ -193,7 +243,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
       if (att?.type === 'skill_listing' && att.isInitial) {
         const skills: string[] = [];
         if (att.content) {
-          for (const m of String(att.content).matchAll(/^- ([^:\n]+):/gm)) {
+          for (const m of String(att.content).matchAll(/^- (.+?): /gm)) {
             skills.push(m[1].trim());
           }
         }
@@ -248,16 +298,19 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
         }
         stats.tools[toolName] = (stats.tools[toolName] || 0) + 1;
 
+        const skillRead = toolName === 'Read' ? detectSkillRead(input) : null;
         entries.push({
           ts,
           action_id: tu.id || `${obj.uuid}-${idx}`,
           parent_id: null,
           child_ids: [],
           event: 'pre',
-          tool: toolName,
-          cmd: buildCmd(toolName, input),
-          input,
+          tool: skillRead ? 'SkillRead' : toolName,
+          cmd: skillRead ? `${skillRead.plugin}:${skillRead.name}` : buildCmd(toolName, input),
+          input: skillRead ? { ...input, skill: skillRead.name, plugin: skillRead.plugin } : input,
           tokens: idx === 0 ? turnTokens : null,
+          skillRead,
+          attribution,
         });
       });
 
@@ -311,6 +364,24 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
       }
 
       if (!toolResults.length && textBlocks.length) {
+        const fullText = textBlocks.map(b => b.text || '').join('\n');
+        const injected = detectInjectedSkills(fullText);
+        injected.forEach((inj, k) => {
+          const idx = inj.name.indexOf(':');
+          const plugin = idx > -1 ? inj.name.slice(0, idx) : '(builtin)';
+          const skill = idx > -1 ? inj.name.slice(idx + 1) : inj.name;
+          entries.push({
+            ts,
+            action_id: `${obj.uuid || `inj-${i}`}-inj${k}`,
+            parent_id: null,
+            child_ids: [],
+            event: 'command',
+            tool: 'SkillInjected',
+            cmd: inj.name,
+            input: { skill, plugin, raw: inj.raw, source: 'system-reminder' },
+            tokens: null,
+          });
+        });
         // Filter out system-injected context blocks (ide_opened_file, reminders, etc.)
         const userText = textBlocks
           .map(b => b.text || '')
@@ -335,7 +406,18 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   }
 
   stats.agentRole = sessionAgentSetting;
-  return { entries, stats, lastLine: lines.length, agentSetting: sessionAgentSetting, agentName: sessionAgentName, teamName: sessionTeamName, teamTask: sessionTeamTask };
+  return {
+    entries,
+    stats,
+    lastLine: lines.length,
+    agentSetting: sessionAgentSetting,
+    agentName: sessionAgentName,
+    teamName: sessionTeamName,
+    teamTask: sessionTeamTask,
+    attributionSkill: sessionAttributionSkill,
+    attributionAgent: sessionAttributionAgent,
+    attributionPlugin: sessionAttributionPlugin,
+  };
 }
 
 function emptyStats(): Stats {
