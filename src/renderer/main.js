@@ -1253,8 +1253,35 @@ const StepLane = {
       const i = n.input || {};
       return i.agent || i.subagent_type || 'general-purpose';
     }
+
+    const injOpenSet = reactive(new Set());
+    function toggleInj(nodeId, e) {
+      if (e) e.stopPropagation();
+      if (injOpenSet.has(nodeId)) injOpenSet.delete(nodeId);
+      else injOpenSet.add(nodeId);
+    }
+    function injOpen(nodeId) { return injOpenSet.has(nodeId); }
+    function injFieldsFor(node) {
+      const inp = node?.input || {};
+      const order = ['subagent_type', 'agent', 'description', 'model', 'team_name', 'isolation', 'mode', 'name', 'run_in_background'];
+      const out = [];
+      for (const k of order) {
+        if (inp[k] != null && inp[k] !== '') out.push({ key: k, value: String(inp[k]), long: false });
+      }
+      for (const k of Object.keys(inp)) {
+        if (order.includes(k) || k === 'prompt') continue;
+        const v = inp[k];
+        if (v == null || v === '') continue;
+        const s = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+        out.push({ key: k, value: s, long: s.length > 120 || s.includes('\n') });
+      }
+      if (inp.prompt) out.push({ key: 'prompt', value: String(inp.prompt), long: true });
+      return out;
+    }
+
     return { steps, toggle, isOpen, stepNum, navigate, agentChildSession, agentChildSessionId,
-             aggregate, getLabelFor, getDescFor, agentType, groupSkills, fmtT, fmtK, fmtDur };
+             aggregate, getLabelFor, getDescFor, agentType, groupSkills, fmtT, fmtK, fmtDur,
+             injOpen, toggleInj, injFieldsFor };
   },
   template: `
     <div class="sl-lane">
@@ -1328,11 +1355,24 @@ const StepLane = {
               <span v-if="getDescFor(s.nodes[0])" class="sl-step__desc-inline">— {{ getDescFor(s.nodes[0]) }}</span>
               <span v-if="s.nodes[0].tool==='Skill' && s.nodes[0].invokerChain && s.nodes[0].invokerChain.length"
                     class="sl-step__invoker-inline">by: {{ s.nodes[0].invokerChain.join(' › ') }}</span>
+              <button v-if="s.nodes[0].tool==='Agent' && injFieldsFor(s.nodes[0]).length"
+                      class="sa-inj-btn" style="margin-left:auto" @click.stop="toggleInj(s.nodes[0].id, $event)"
+                      :title="injOpen(s.nodes[0].id) ? 'Hide spawn payload' : 'Show everything injected to this sub-agent'">
+                {{ injOpen(s.nodes[0].id) ? '&#x25BC;' : '&#x25B6;' }} payload
+              </button>
               <span class="sl-step__meta">
                 <span v-if="aggregate(s.nodes).span" class="sl-meta__dur">{{ fmtDur(aggregate(s.nodes).span) }}</span>
                 <span v-if="s.nodes[0].status==='active'" class="sl-live">● LIVE</span>
               </span>
               <span class="sl-step__chev">{{ isOpen('s'+i) ? '▼' : '▶' }}</span>
+            </div>
+            <div v-if="s.nodes[0].tool==='Agent' && injOpen(s.nodes[0].id)" class="sa-inj" style="margin:6px 12px 4px" @click.stop>
+              <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+              <div v-for="f in injFieldsFor(s.nodes[0])" :key="f.key" class="sa-inj__field">
+                <div class="sa-inj__key">{{ f.key }}</div>
+                <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
+                <div v-else class="sa-inj__val">{{ f.value }}</div>
+              </div>
             </div>
             <div v-if="isOpen('s'+i)" class="sl-step__detail">
               <template v-if="agentChildSession(s.nodes[0])">
@@ -1373,12 +1413,25 @@ const StepLane = {
                 <div v-for="(n, ni) in s.nodes" :key="n.id" class="sl-col">
                   <div class="sl-col__hdr">
                     <span class="sl-col__type">{{ agentType(n) }}</span>
+                    <button v-if="injFieldsFor(n).length"
+                            class="sa-inj-btn" style="margin-left:auto" @click.stop="toggleInj(n.id, $event)"
+                            :title="injOpen(n.id) ? 'Hide spawn payload' : 'Show everything injected to this sub-agent'">
+                      {{ injOpen(n.id) ? '&#x25BC;' : '&#x25B6;' }} payload
+                    </button>
                     <button v-if="agentChildSessionId(n)"
                             class="sl-col__nav" @click="navigate(agentChildSessionId(n), $event)"
                             title="Open this sub-agent's session">↗</button>
                   </div>
                   <div v-if="getLabelFor(n)" class="sl-col__label" :title="getLabelFor(n)">{{ getLabelFor(n) }}</div>
                   <div v-if="getDescFor(n)" class="sl-col__desc">{{ getDescFor(n) }}</div>
+                  <div v-if="injOpen(n.id)" class="sa-inj" style="margin:6px 0 4px" @click.stop>
+                    <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+                    <div v-for="f in injFieldsFor(n)" :key="f.key" class="sa-inj__field">
+                      <div class="sa-inj__key">{{ f.key }}</div>
+                      <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
+                      <div v-else class="sa-inj__val">{{ f.value }}</div>
+                    </div>
+                  </div>
                   <div class="sl-col__lane">
                     <step-lane v-if="agentChildSession(n)"
                                :node="agentChildSession(n)" :token-index="tokenIndex"
