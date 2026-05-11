@@ -914,6 +914,13 @@ input, select { font-family: inherit; }
   font-size: 11px; transition: border-color .12s, box-shadow .12s;
 }
 .bp-task:hover { border-color: var(--border-2); box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.bp-task__row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.bp-task--inj-open {
+  flex-direction: column; align-items: stretch;
+  max-width: 720px; min-width: 320px;
+}
+.bp-task--inj-open .bp-task__row { padding-bottom: 4px; }
+.bp-task--inj-open .sa-inj { border-top: 1px dashed var(--border-2); margin-top: 4px; }
 .bp-task__icon {
   width: 22px; height: 22px; border-radius: 5px; display: flex;
   align-items: center; justify-content: center; font-size: 10px;
@@ -1064,9 +1071,28 @@ input, select { font-family: inherit; }
 
 /* ── Sub-agent flow view ─────────────────────────────────────────────────── */
 .sa-view { width: 100%; display: flex; flex-direction: column; align-items: center; }
-.sa-view__lbl {
-  font-size: 10px; font-weight: 700; color: var(--agent); text-transform: uppercase;
-  letter-spacing: .07em; padding: 10px 0 0; opacity: .8;
+.sa-view__banner {
+  align-self: stretch;
+  margin: 24px 0 6px;
+  padding: 10px 16px;
+  background: linear-gradient(90deg, var(--agent-bg) 0%, #fff 100%);
+  border-top: 2px solid var(--agent);
+  border-bottom: 2px solid var(--agent);
+  display: flex; align-items: center; gap: 10px;
+}
+.sa-view__banner-icon {
+  width: 28px; height: 28px; border-radius: 6px;
+  background: var(--agent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; flex-shrink: 0;
+}
+.sa-view__banner-title {
+  font-size: 13px; font-weight: 700; color: var(--agent);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.sa-view__banner-count {
+  font-size: 11px; color: var(--text-2); font-family: var(--font-mono);
+  margin-left: auto;
 }
 
 /* Forked branches layout */

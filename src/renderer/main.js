@@ -885,7 +885,28 @@ const ProcessNode = {
     });
 
     const skillGroups = computed(() => groupSkills(props.node.input?.skills));
-    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, skillGroups, label, desc, taskClass, toolIcon, childGroups, childTree };
+
+    const injOpen = ref(false);
+    function toggleInj(e) { if (e) e.stopPropagation(); injOpen.value = !injOpen.value; }
+    const injFields = computed(() => {
+      const inp = props.node?.input || {};
+      const order = ['subagent_type', 'agent', 'description', 'model', 'team_name', 'isolation', 'mode', 'name', 'run_in_background'];
+      const out = [];
+      for (const k of order) {
+        if (inp[k] != null && inp[k] !== '') out.push({ key: k, value: String(inp[k]), long: false });
+      }
+      for (const k of Object.keys(inp)) {
+        if (order.includes(k) || k === 'prompt') continue;
+        const v = inp[k];
+        if (v == null || v === '') continue;
+        const s = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+        out.push({ key: k, value: s, long: s.length > 120 || s.includes('\n') });
+      }
+      if (inp.prompt) out.push({ key: 'prompt', value: String(inp.prompt), long: true });
+      return out;
+    });
+
+    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, skillGroups, label, desc, taskClass, toolIcon, childGroups, childTree, injOpen, toggleInj, injFields };
   },
   template: `
     <div class="bp-flow">
@@ -898,7 +919,19 @@ const ProcessNode = {
           <span class="bp-subprocess__name">{{ label }}</span>
           <span v-if="desc" class="bp-subprocess__desc">{{ desc }}</span>
           <span v-if="isSkill && node.invokerChain && node.invokerChain.length" class="bp-task__invoker" style="margin-left:8px">by: {{ node.invokerChain.join(' › ') }}</span>
+          <button v-if="isAgent && injFields.length" class="sa-inj-btn" style="margin-left:auto" @click.stop="toggleInj($event)"
+                  :title="injOpen ? 'Hide spawn payload' : 'Show everything injected to this sub-agent'">
+            {{ injOpen ? '&#x25BC;' : '&#x25B6;' }} payload
+          </button>
           <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF; RUNNING</span>
+        </div>
+        <div v-if="isAgent && injOpen" class="sa-inj" style="margin:0 12px 4px">
+          <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+          <div v-for="f in injFields" :key="f.key" class="sa-inj__field">
+            <div class="sa-inj__key">{{ f.key }}</div>
+            <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
+            <div v-else class="sa-inj__val">{{ f.value }}</div>
+          </div>
         </div>
         <div class="bp-subprocess__body">
           <template v-for="(g, gi) in childGroups" :key="gi">
@@ -945,15 +978,29 @@ const ProcessNode = {
           </div>
         </div>
       </div>
-      <div v-else :class="['bp-task', taskClass(node.tool), node.tool==='SkillRead'?'bp-task--skillread':'', node.tool==='SkillInjected'?'bp-task--skillinjected':'']"
+      <div v-else :class="['bp-task', taskClass(node.tool), node.tool==='SkillRead'?'bp-task--skillread':'', node.tool==='SkillInjected'?'bp-task--skillinjected':'', isAgent && injOpen ? 'bp-task--inj-open' : '']"
            :title="label + (node.invokerChain ? '\\nInvoked by: ' + node.invokerChain.join(' › ') : '') + (node.ts ? '\\nat: ' + node.ts.slice(11,19) : '')">
-        <div class="bp-task__icon">{{ toolIcon(node.tool) }}</div>
-        <div class="bp-task__body">
-          <div v-if="node.tool !== 'User' && node.tool !== 'Command'" class="bp-task__type">{{ node.tool }}</div>
-          <div class="bp-task__label">{{ label || node.cmd || '—' }}</div>
-          <div v-if="node.invokerChain && node.invokerChain.length" class="bp-task__invoker">by: {{ node.invokerChain.join(' › ') }}</div>
+        <div class="bp-task__row">
+          <div class="bp-task__icon">{{ toolIcon(node.tool) }}</div>
+          <div class="bp-task__body">
+            <div v-if="node.tool !== 'User' && node.tool !== 'Command'" class="bp-task__type">{{ node.tool }}</div>
+            <div class="bp-task__label">{{ label || node.cmd || '—' }}</div>
+            <div v-if="node.invokerChain && node.invokerChain.length" class="bp-task__invoker">by: {{ node.invokerChain.join(' › ') }}</div>
+          </div>
+          <button v-if="isAgent && injFields.length" class="sa-inj-btn" @click.stop="toggleInj($event)"
+                  :title="injOpen ? 'Hide spawn payload' : 'Show everything injected to this sub-agent'">
+            {{ injOpen ? '&#x25BC;' : '&#x25B6;' }} payload
+          </button>
+          <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF;</span>
         </div>
-        <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF;</span>
+        <div v-if="isAgent && injOpen" class="sa-inj">
+          <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+          <div v-for="f in injFields" :key="f.key" class="sa-inj__field">
+            <div class="sa-inj__key">{{ f.key }}</div>
+            <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
+            <div v-else class="sa-inj__val">{{ f.value }}</div>
+          </div>
+        </div>
       </div>
     </div>
   `
@@ -1026,7 +1073,11 @@ const SubAgentFlowView = {
   },
   template: `
     <div class="sa-view">
-      <div class="sa-view__lbl">&#x26A1; Sub-agent sessions</div>
+      <div class="sa-view__banner">
+        <div class="sa-view__banner-icon">&#x26A1;</div>
+        <div class="sa-view__banner-title">Sub-agent sessions</div>
+        <div class="sa-view__banner-count">{{ items.length }} spawned · click <b>payload</b> to inspect</div>
+      </div>
       <div class="bp-conn"></div>
       <div class="bp-gateway"><span class="bp-gateway__inner">+</span></div>
       <div class="sa-fork">
