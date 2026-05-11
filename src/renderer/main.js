@@ -663,10 +663,31 @@ const FlowNode = {
       return { tools: Object.entries(counts).map(([t,c])=>({tool:t,count:c,tag:leafTagClass(t)})), totalIn: ti };
     }
 
+    const injOpen = ref(false);
+    function toggleInj(e) { if (e) e.stopPropagation(); injOpen.value = !injOpen.value; }
+    const injFields = computed(() => {
+      const inp = props.node?.input || {};
+      const order = ['subagent_type', 'agent', 'description', 'model', 'team_name', 'isolation', 'mode', 'name', 'run_in_background'];
+      const out = [];
+      for (const k of order) {
+        if (inp[k] != null && inp[k] !== '') out.push({ key: k, value: String(inp[k]), long: false });
+      }
+      for (const k of Object.keys(inp)) {
+        if (order.includes(k) || k === 'prompt') continue;
+        const v = inp[k];
+        if (v == null || v === '') continue;
+        const s = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+        out.push({ key: k, value: s, long: s.length > 120 || s.includes('\n') });
+      }
+      if (inp.prompt) out.push({ key: 'prompt', value: String(inp.prompt), long: true });
+      return out;
+    });
+
     return { respOpen, hasKids, isExpanded, isAgent, isSkill, isContainer,
              tok, totalIn, totalOut, hasTok, label, desc, resp, tagClass, answerExcerpt,
              toggle, goParent, fmtK, fmtT,
-             childGroups, collapsedGroups, toggleGroup, cmdSummary };
+             childGroups, collapsedGroups, toggleGroup, cmdSummary,
+             injOpen, toggleInj, injFields };
   },
   template: `
     <div :id="'node-'+node.id">
@@ -678,12 +699,24 @@ const FlowNode = {
           <span class="n-agent__title">{{ label }}</span>
           <span class="n-agent__desc" v-if="desc">{{ desc }}</span>
           <div class="n-agent__meta">
+            <button v-if="injFields.length" class="sa-inj-btn" @click.stop="toggleInj($event)"
+                    :title="injOpen ? 'Hide spawn payload' : 'Show everything injected to this sub-agent'">
+              {{ injOpen ? '&#x25BC;' : '&#x25B6;' }} payload
+            </button>
             <span v-if="hasTok" class="n-agent__tokens">
               <span class="t-in">&uarr;{{ fmtK(totalIn) }}</span>
               <span class="t-out">&darr;{{ fmtK(totalOut) }}</span>
             </span>
             <span v-if="node.status==='active'" class="n-agent__status n-agent__status--active">RUNNING</span>
             <span class="n-agent__toggle" v-if="hasKids">{{ isExpanded ? '▼' : '▶' }} {{ node.children.length }}</span>
+          </div>
+        </div>
+        <div v-if="injOpen && injFields.length" class="sa-inj" style="margin:0 12px 8px" @click.stop>
+          <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+          <div v-for="f in injFields" :key="f.key" class="sa-inj__field">
+            <div class="sa-inj__key">{{ f.key }}</div>
+            <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
+            <div v-else class="sa-inj__val">{{ f.value }}</div>
           </div>
         </div>
         <div v-if="answerExcerpt" class="n-agent__answer" @click.stop="respOpen=!respOpen">
