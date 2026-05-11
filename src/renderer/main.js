@@ -997,10 +997,32 @@ const SubAgentFlowView = {
     });
 
     const expanded = reactive(new Set());
+    const injOpen = reactive(new Set());
     function toggle(id) { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); }
+    function toggleInj(id, e) { if (e) e.stopPropagation(); if (injOpen.has(id)) injOpen.delete(id); else injOpen.add(id); }
     function navigate(id, e) { e.stopPropagation(); if (props.onNavigate) props.onNavigate(id); }
 
-    return { items, expanded, toggle, navigate };
+    function injectionFields(agentNode) {
+      const inp = agentNode?.input || {};
+      const order = ['subagent_type', 'agent', 'description', 'model', 'team_name', 'isolation', 'mode', 'name', 'run_in_background'];
+      const fields = [];
+      for (const k of order) {
+        if (inp[k] != null && inp[k] !== '') fields.push({ key: k, value: String(inp[k]), long: false });
+      }
+      for (const k of Object.keys(inp)) {
+        if (order.includes(k) || k === 'prompt') continue;
+        const v = inp[k];
+        if (v == null || v === '') continue;
+        const s = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+        fields.push({ key: k, value: s, long: s.length > 120 || s.includes('\n') });
+      }
+      if (inp.prompt) {
+        fields.push({ key: 'prompt', value: String(inp.prompt), long: true });
+      }
+      return fields;
+    }
+
+    return { items, expanded, injOpen, toggle, toggleInj, navigate, injectionFields };
   },
   template: `
     <div class="sa-view">
@@ -1011,14 +1033,30 @@ const SubAgentFlowView = {
         <div v-for="item in items" :key="item.sess.id" class="sa-branch">
           <div class="sa-fork-arm"></div>
           <!-- Agent call box -->
-          <div class="sa-agent-call">
-            <div class="sa-agent-call__icon">A</div>
-            <div class="sa-agent-call__body">
-              <div class="sa-agent-call__type">{{ item.agentType }}</div>
-              <div v-if="item.sess.info?.attribution_skill" class="sa-agent-call__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ item.sess.info.attribution_skill }}</div>
-              <div v-if="item.label" class="sa-agent-call__label" :title="item.label">{{ item.label }}</div>
+          <div :class="['sa-agent-call', injOpen.has(item.sess.id) ? 'sa-agent-call--open' : '']">
+            <div class="sa-agent-call__row">
+              <div class="sa-agent-call__icon">A</div>
+              <div class="sa-agent-call__body">
+                <div class="sa-agent-call__type">{{ item.agentType }}</div>
+                <div v-if="item.sess.info?.attribution_skill" class="sa-agent-call__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ item.sess.info.attribution_skill }}</div>
+                <div v-if="item.label" class="sa-agent-call__label" :title="item.label">{{ item.label }}</div>
+              </div>
+              <button v-if="item.agentNode" class="sa-inj-btn"
+                      @click.stop="toggleInj(item.sess.id, $event)"
+                      :title="injOpen.has(item.sess.id) ? 'Hide spawn payload' : 'Show everything injected to this sub-agent'">
+                {{ injOpen.has(item.sess.id) ? '&#x25BC;' : '&#x25B6;' }} payload
+              </button>
+              <span v-if="item.sess.info?.is_active" class="n-agent__status n-agent__status--active" style="font-size:8px">LIVE</span>
             </div>
-            <span v-if="item.sess.info?.is_active" class="n-agent__status n-agent__status--active" style="font-size:8px">LIVE</span>
+            <div v-if="injOpen.has(item.sess.id) && item.agentNode" class="sa-inj">
+              <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+              <div v-for="f in injectionFields(item.agentNode)" :key="f.key" class="sa-inj__field">
+                <div class="sa-inj__key">{{ f.key }}</div>
+                <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
+                <div v-else class="sa-inj__val">{{ f.value }}</div>
+              </div>
+              <div v-if="!injectionFields(item.agentNode).length" class="sa-inj__empty">No input recorded for this Agent call.</div>
+            </div>
           </div>
           <!-- Downward arrow to session card -->
           <div class="sa-arrow"></div>
