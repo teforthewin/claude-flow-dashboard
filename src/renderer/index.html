@@ -1526,6 +1526,23 @@ input, select { font-family: inherit; }
   text-align: center;
 }
 
+/* ── Model tag ─────────────────────────────────────────────────── */
+.model-tag {
+  display: inline-block;
+  font-size: 9px; font-weight: 700;
+  font-family: var(--font-mono); letter-spacing: .02em;
+  text-transform: none;
+  padding: 1px 6px; border-radius: 3px;
+  border: 1px solid transparent;
+  white-space: nowrap; line-height: 1.4;
+  vertical-align: 1px;
+  margin-left: 6px;
+  background: #f1f5f9; color: #475569; border-color: #cbd5e1;
+}
+.model-tag--opus   { background: #ede9fe; color: #6d28d9; border-color: #ddd6fe; }
+.model-tag--sonnet { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
+.model-tag--haiku  { background: #dcfce7; color: #15803d; border-color: #bbf7d0; }
+
 /* ── Payload large-view modal ──────────────────────────────────── */
 .pl-modal {
   position: fixed; inset: 0; z-index: 10000;
@@ -1695,6 +1712,7 @@ input, select { font-family: inherit; }
                          @click.stop="toggleSessionSelect(s.session_id)" />
                   <span v-if="s.is_active" class="sess__live">LIVE</span>
                   <span class="sess__title">{{ s.title || timeOf(s.first_ts) || s.session_id.slice(0,8) }}</span>
+                  <span v-if="s.model" :class="modelClass(s.model)" :title="'Model: '+s.model">{{ formatModel(s.model) }}</span>
                   <button v-if="!selectMode && s.child_ids?.length" class="sess__children-btn"
                           @click.stop="toggleParentExpand(s.session_id)">
                     {{ expandedParents[s.session_id] ? '▼' : '▶' }} {{ s.child_ids.length }}
@@ -1716,6 +1734,7 @@ input, select { font-family: inherit; }
                       <span class="sess__child-icon">⤷</span>
                       <span v-if="sessionMap.get(childId).is_active" class="sess__live">LIVE</span>
                       <span class="sess__child-title">{{ sessionMap.get(childId).title || sessionMap.get(childId).agent_description || sessionMap.get(childId).agent_name || timeOf(sessionMap.get(childId).first_ts) }}</span>
+                      <span v-if="sessionMap.get(childId).model" :class="modelClass(sessionMap.get(childId).model)" :title="'Model: '+sessionMap.get(childId).model">{{ formatModel(sessionMap.get(childId).model) }}</span>
                       <button v-if="!selectMode" class="sess__copy"
                               @click.stop="copySessionId(childId, $event)"
                               :title="'Copy session id: ' + childId">{{ copiedSessionId === childId ? '✓' : '⧉' }}</button>
@@ -1775,6 +1794,11 @@ input, select { font-family: inherit; }
       <!-- Session title bar -->
       <div class="session-title-bar" v-if="sessionTitle">
         <span class="session-title-bar__text">{{ sessionTitle }}</span>
+        <span v-if="sessionMap.get(activeSession)?.model"
+              :class="modelClass(sessionMap.get(activeSession).model)"
+              :title="'Model: '+sessionMap.get(activeSession).model">
+          {{ formatModel(sessionMap.get(activeSession).model) }}
+        </span>
         <span class="session-title-bar__id" v-if="activeSession"
               :title="'Click to copy: ' + activeSession"
               @click="copySessionId(activeSession, $event)">

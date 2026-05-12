@@ -5,6 +5,24 @@ function openPayloadModal(title, subtitle, fields) {
   if (window.__loomShowPayload) window.__loomShowPayload(title, subtitle, fields);
 }
 
+function formatModel(raw) {
+  if (!raw) return '';
+  const s = String(raw).toLowerCase();
+  const m = s.match(/(opus|sonnet|haiku)[-_]?(\d+)[-_.]?(\d+)?/);
+  if (!m) return raw;
+  const tier = m[1].charAt(0).toUpperCase() + m[1].slice(1);
+  const ver = m[3] ? `${m[2]}.${m[3]}` : m[2];
+  return `${tier} ${ver}`;
+}
+
+function modelClass(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (s.includes('opus'))   return 'model-tag model-tag--opus';
+  if (s.includes('sonnet')) return 'model-tag model-tag--sonnet';
+  if (s.includes('haiku'))  return 'model-tag model-tag--haiku';
+  return 'model-tag';
+}
+
 function fmtK(n) {
   if (!n) return '0';
   if (n >= 1_000_000) return (Math.round(n / 100_000) / 10) + 'M';
@@ -1121,7 +1139,7 @@ const SubAgentFlowView = {
       return fields;
     }
 
-    return { items, expanded, injOpen, toggle, toggleInj, navigate, injectionFields, openPayloadModal };
+    return { items, expanded, injOpen, toggle, toggleInj, navigate, injectionFields, openPayloadModal, formatModel, modelClass };
   },
   template: `
     <div class="sa-view">
@@ -1140,7 +1158,10 @@ const SubAgentFlowView = {
             <div class="sa-agent-call__row">
               <div class="sa-agent-call__icon">A</div>
               <div class="sa-agent-call__body">
-                <div class="sa-agent-call__type">{{ item.agentType }}</div>
+                <div class="sa-agent-call__type">
+                  <span>{{ item.agentType }}</span>
+                  <span v-if="item.sess.info?.model" :class="modelClass(item.sess.info.model)" :title="'Model: '+item.sess.info.model">{{ formatModel(item.sess.info.model) }}</span>
+                </div>
                 <div v-if="item.sess.info?.attribution_skill" class="sa-agent-call__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ item.sess.info.attribution_skill }}</div>
                 <div v-if="item.label" class="sa-agent-call__label" :title="item.label">{{ item.label }}</div>
               </div>
@@ -1208,7 +1229,7 @@ const TeamView = {
       e.stopPropagation();
       if (props.onNavigate) props.onNavigate(id);
     }
-    return { expanded, toggle, navigate };
+    return { expanded, toggle, navigate, formatModel, modelClass };
   },
   template: `
     <div class="team-view">
@@ -1218,6 +1239,7 @@ const TeamView = {
              :class="['tm-card', expanded.has(s.id) ? 'tm-card--expanded' : '']">
           <div class="tm-card__hdr" @click="toggle(s.id)">
             <span class="tm-card__agent">{{ s.info.agent_name || s.info.agent_description || 'Sub-agent' }}</span>
+            <span v-if="s.info.model" :class="modelClass(s.info.model)" :title="'Model: '+s.info.model">{{ formatModel(s.info.model) }}</span>
             <span v-if="s.info.attribution_skill" class="tm-card__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ s.info.attribution_skill }}</span>
             <span v-if="s.info.is_active" class="tm-card__live">LIVE</span>
             <span class="tm-card__stats">{{ s.info.event_count }}ev</span>
@@ -2591,7 +2613,8 @@ const app = createApp({
              resolvePostTool,
              settingsOpen, settingsDraft, settingsChanged, browseFolder, saveSettings,
              pathWarnings,
-             payloadModal, closePayload, copyPayloadField, copyPayloadAll };
+             payloadModal, closePayload, copyPayloadField, copyPayloadAll,
+             formatModel, modelClass };
   }
 });
 app.mount('#app');

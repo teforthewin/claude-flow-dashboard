@@ -1,0 +1,51 @@
+# ── LoomScope Electron build (produces Linux AppImage/deb in dist/) ──────────
+#
+# Usage (from repo root):
+#   docker build -f Dockerfile.build --output dist-linux .
+#
+# The final stage exports only the packaged artefacts to dist-linux/ on the host.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 1. Build stage ────────────────────────────────────────────────────────────
+FROM node:20-bookworm-slim AS builder
+
+# electron-builder needs these system libs for the Linux target
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    python3 \
+    make \
+    g++ \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libcups2 \
+    libdrm2 \
+    libgtk-3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Install dependencies first (cache layer)
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source
+COPY . .
+
+# Build renderer + main, then package for Linux
+RUN npm run build
+RUN npx electron-builder --linux --x64
+
+# ── 2. Export stage ───────────────────────────────────────────────────────────
+FROM scratch AS export
+COPY --from=builder /build/dist/*.AppImage /
+COPY --from=builder /build/dist/*.deb      /

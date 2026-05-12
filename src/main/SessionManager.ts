@@ -22,6 +22,8 @@ export interface SessionState {
   attributionSkill: string;
   attributionAgent: string;
   attributionPlugin: string;
+  model: string;
+  modelCounts: Record<string, number>;
 }
 
 export interface SessionInfo {
@@ -40,6 +42,8 @@ export interface SessionInfo {
   attribution_skill: string;
   attribution_agent: string;
   attribution_plugin: string;
+  model: string;
+  model_counts: Record<string, number>;
 }
 
 function getProjectName(dirName: string): string {
@@ -188,6 +192,8 @@ export class SessionManager extends EventEmitter {
       attributionSkill: result.attributionSkill,
       attributionAgent: result.attributionAgent,
       attributionPlugin: result.attributionPlugin,
+      model: result.model,
+      modelCounts: result.modelCounts,
     };
     this.sessions.set(sessionId, state);
 
@@ -220,6 +226,16 @@ export class SessionManager extends EventEmitter {
     if (!state.attributionSkill && result.attributionSkill) state.attributionSkill = result.attributionSkill;
     if (!state.attributionAgent && result.attributionAgent) state.attributionAgent = result.attributionAgent;
     if (!state.attributionPlugin && result.attributionPlugin) state.attributionPlugin = result.attributionPlugin;
+    if (result.modelCounts) {
+      for (const [m, c] of Object.entries(result.modelCounts)) {
+        state.modelCounts[m] = (state.modelCounts[m] || 0) + c;
+      }
+      let bestModel = state.model, bestCount = state.modelCounts[bestModel] || 0;
+      for (const [m, c] of Object.entries(state.modelCounts)) {
+        if (c > bestCount) { bestModel = m; bestCount = c; }
+      }
+      state.model = bestModel;
+    }
     if (!state.title) {
       const firstPrompt = state.entries.find(e => e.event === 'prompt' && e.tool === 'User');
       state.title = firstPrompt?.cmd || result.agentSetting || result.agentName || '';
@@ -253,6 +269,8 @@ export class SessionManager extends EventEmitter {
         attribution_skill: state.attributionSkill,
         attribution_agent: state.attributionAgent,
         attribution_plugin: state.attributionPlugin,
+        model: state.model,
+        model_counts: state.modelCounts,
       });
     }
     return list.sort((a, b) => b.last_ts.localeCompare(a.last_ts));

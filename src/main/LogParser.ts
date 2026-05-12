@@ -51,6 +51,8 @@ export interface ParseResult {
   attributionSkill: string;
   attributionAgent: string;
   attributionPlugin: string;
+  model: string;
+  modelCounts: Record<string, number>;
 }
 
 interface NativeContentBlock {
@@ -74,6 +76,7 @@ interface NativeMessage {
   role?: string;
   content?: NativeContentBlock[] | string;
   usage?: NativeUsage;
+  model?: string;
 }
 
 interface NativeEntry {
@@ -174,7 +177,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   try {
     lines = fs.readFileSync(filePath, 'utf-8').split('\n');
   } catch {
-    return { entries: [], stats: emptyStats(), lastLine: fromLine, agentSetting: '', agentName: '', teamName: '', teamTask: '', attributionSkill: '', attributionAgent: '', attributionPlugin: '' };
+    return { entries: [], stats: emptyStats(), lastLine: fromLine, agentSetting: '', agentName: '', teamName: '', teamTask: '', attributionSkill: '', attributionAgent: '', attributionPlugin: '', model: '', modelCounts: {} };
   }
 
   const entries: AppEntry[] = [];
@@ -187,6 +190,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   let sessionAttributionSkill = '';
   let sessionAttributionAgent = '';
   let sessionAttributionPlugin = '';
+  const modelCounts: Record<string, number> = {};
 
   for (let i = fromLine; i < lines.length; i++) {
     const raw = lines[i].trim();
@@ -268,6 +272,9 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
     if (obj.type === 'assistant') {
       const content = msg.content;
       if (!Array.isArray(content)) continue;
+
+      const model = msg.model || '';
+      if (model) modelCounts[model] = (modelCounts[model] || 0) + 1;
 
       const toolUses = content.filter(b => b.type === 'tool_use');
       if (!toolUses.length) continue;
@@ -406,6 +413,11 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   }
 
   stats.agentRole = sessionAgentSetting;
+  let dominantModel = '';
+  let maxCount = 0;
+  for (const [m, c] of Object.entries(modelCounts)) {
+    if (c > maxCount) { dominantModel = m; maxCount = c; }
+  }
   return {
     entries,
     stats,
@@ -417,6 +429,8 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
     attributionSkill: sessionAttributionSkill,
     attributionAgent: sessionAttributionAgent,
     attributionPlugin: sessionAttributionPlugin,
+    model: dominantModel,
+    modelCounts,
   };
 }
 
