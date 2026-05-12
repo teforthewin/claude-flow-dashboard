@@ -1,6 +1,10 @@
 import { createApp, ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, shallowRef } from 'vue';
 
 // ─── Utilities ───────────────────────────────────────────────────────────
+function openPayloadModal(title, subtitle, fields) {
+  if (window.__loomShowPayload) window.__loomShowPayload(title, subtitle, fields);
+}
+
 function fmtK(n) {
   if (!n) return '0';
   if (n >= 1_000_000) return (Math.round(n / 100_000) / 10) + 'M';
@@ -687,7 +691,7 @@ const FlowNode = {
              tok, totalIn, totalOut, hasTok, label, desc, resp, tagClass, answerExcerpt,
              toggle, goParent, fmtK, fmtT,
              childGroups, collapsedGroups, toggleGroup, cmdSummary,
-             injOpen, toggleInj, injFields };
+             injOpen, toggleInj, injFields, openPayloadModal };
   },
   template: `
     <div :id="'node-'+node.id">
@@ -712,7 +716,12 @@ const FlowNode = {
           </div>
         </div>
         <div v-if="injOpen && injFields.length" class="sa-inj" style="margin:0 12px 8px" @click.stop>
-          <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+          <div class="sa-inj__hdr">
+            <span>Injected to sub-agent (Agent tool input)</span>
+            <button class="sa-inj__open"
+                    @click.stop="openPayloadModal(node.input?.subagent_type || node.input?.agent || 'Sub-agent', node.input?.description || '', injFields)"
+                    title="Open in full screen">&#x26F6; open large</button>
+          </div>
           <div v-for="f in injFields" :key="f.key" class="sa-inj__field">
             <div class="sa-inj__key">{{ f.key }}</div>
             <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
@@ -939,7 +948,7 @@ const ProcessNode = {
       return out;
     });
 
-    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, skillGroups, label, desc, taskClass, toolIcon, childGroups, childTree, injOpen, toggleInj, injFields };
+    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, skillGroups, label, desc, taskClass, toolIcon, childGroups, childTree, injOpen, toggleInj, injFields, openPayloadModal };
   },
   template: `
     <div class="bp-flow">
@@ -959,7 +968,12 @@ const ProcessNode = {
           <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF; RUNNING</span>
         </div>
         <div v-if="isAgent && injOpen" class="sa-inj" style="margin:0 12px 4px">
-          <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+          <div class="sa-inj__hdr">
+            <span>Injected to sub-agent (Agent tool input)</span>
+            <button class="sa-inj__open"
+                    @click.stop="openPayloadModal(node.input?.subagent_type || node.input?.agent || 'Sub-agent', node.input?.description || '', injFields)"
+                    title="Open in full screen">&#x26F6; open large</button>
+          </div>
           <div v-for="f in injFields" :key="f.key" class="sa-inj__field">
             <div class="sa-inj__key">{{ f.key }}</div>
             <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
@@ -1027,7 +1041,12 @@ const ProcessNode = {
           <span v-if="node.status==='active'" class="bp-task__status" style="color:var(--green)">&#x25CF;</span>
         </div>
         <div v-if="isAgent && injOpen" class="sa-inj">
-          <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+          <div class="sa-inj__hdr">
+            <span>Injected to sub-agent (Agent tool input)</span>
+            <button class="sa-inj__open"
+                    @click.stop="openPayloadModal(node.input?.subagent_type || node.input?.agent || 'Sub-agent', node.input?.description || '', injFields)"
+                    title="Open in full screen">&#x26F6; open large</button>
+          </div>
           <div v-for="f in injFields" :key="f.key" class="sa-inj__field">
             <div class="sa-inj__key">{{ f.key }}</div>
             <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
@@ -1102,7 +1121,7 @@ const SubAgentFlowView = {
       return fields;
     }
 
-    return { items, expanded, injOpen, toggle, toggleInj, navigate, injectionFields };
+    return { items, expanded, injOpen, toggle, toggleInj, navigate, injectionFields, openPayloadModal };
   },
   template: `
     <div class="sa-view">
@@ -1133,7 +1152,12 @@ const SubAgentFlowView = {
               <span v-if="item.sess.info?.is_active" class="n-agent__status n-agent__status--active" style="font-size:8px">LIVE</span>
             </div>
             <div v-if="injOpen.has(item.sess.id) && item.agentNode" class="sa-inj">
-              <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+              <div class="sa-inj__hdr">
+                <span>Injected to sub-agent (Agent tool input)</span>
+                <button class="sa-inj__open"
+                        @click.stop="openPayloadModal(item.agentType || 'Sub-agent', item.label || '', injectionFields(item.agentNode))"
+                        title="Open in full screen">&#x26F6; open large</button>
+              </div>
               <div v-for="f in injectionFields(item.agentNode)" :key="f.key" class="sa-inj__field">
                 <div class="sa-inj__key">{{ f.key }}</div>
                 <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
@@ -1281,7 +1305,7 @@ const StepLane = {
 
     return { steps, toggle, isOpen, stepNum, navigate, agentChildSession, agentChildSessionId,
              aggregate, getLabelFor, getDescFor, agentType, groupSkills, fmtT, fmtK, fmtDur,
-             injOpen, toggleInj, injFieldsFor };
+             injOpen, toggleInj, injFieldsFor, openPayloadModal };
   },
   template: `
     <div class="sl-lane">
@@ -1367,7 +1391,12 @@ const StepLane = {
               <span class="sl-step__chev">{{ isOpen('s'+i) ? '▼' : '▶' }}</span>
             </div>
             <div v-if="s.nodes[0].tool==='Agent' && injOpen(s.nodes[0].id)" class="sa-inj" style="margin:6px 12px 4px" @click.stop>
-              <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+              <div class="sa-inj__hdr">
+                <span>Injected to sub-agent (Agent tool input)</span>
+                <button class="sa-inj__open"
+                        @click.stop="openPayloadModal(s.nodes[0].input?.subagent_type || s.nodes[0].input?.agent || 'Sub-agent', s.nodes[0].input?.description || '', injFieldsFor(s.nodes[0]))"
+                        title="Open in full screen">&#x26F6; open large</button>
+              </div>
               <div v-for="f in injFieldsFor(s.nodes[0])" :key="f.key" class="sa-inj__field">
                 <div class="sa-inj__key">{{ f.key }}</div>
                 <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
@@ -1425,7 +1454,12 @@ const StepLane = {
                   <div v-if="getLabelFor(n)" class="sl-col__label" :title="getLabelFor(n)">{{ getLabelFor(n) }}</div>
                   <div v-if="getDescFor(n)" class="sl-col__desc">{{ getDescFor(n) }}</div>
                   <div v-if="injOpen(n.id)" class="sa-inj" style="margin:6px 0 4px" @click.stop>
-                    <div class="sa-inj__hdr">Injected to sub-agent (Agent tool input)</div>
+                    <div class="sa-inj__hdr">
+                      <span>Injected to sub-agent (Agent tool input)</span>
+                      <button class="sa-inj__open"
+                              @click.stop="openPayloadModal(n.input?.subagent_type || n.input?.agent || 'Sub-agent', n.input?.description || '', injFieldsFor(n))"
+                              title="Open in full screen">&#x26F6; open large</button>
+                    </div>
                     <div v-for="f in injFieldsFor(n)" :key="f.key" class="sa-inj__field">
                       <div class="sa-inj__key">{{ f.key }}</div>
                       <div v-if="f.long" class="sa-inj__val sa-inj__val--long"><pre>{{ f.value }}</pre></div>
@@ -1774,6 +1808,32 @@ const app = createApp({
   setup() {
     const sidebarWidth = ref(280);
     const sidebarDragging = ref(false);
+
+    // ── Sub-agent payload modal (global) ────────────────────────────────
+    const payloadModal = reactive({ open: false, title: '', subtitle: '', fields: [] });
+    function showPayload(title, subtitle, fields) {
+      payloadModal.title = title || 'Sub-agent payload';
+      payloadModal.subtitle = subtitle || '';
+      payloadModal.fields = fields || [];
+      payloadModal.open = true;
+    }
+    function closePayload() { payloadModal.open = false; }
+    function onPayloadKey(e) {
+      if (e.key === 'Escape' && payloadModal.open) closePayload();
+    }
+    function copyPayloadField(value) {
+      navigator.clipboard?.writeText(String(value));
+    }
+    function copyPayloadAll() {
+      const txt = payloadModal.fields.map(f => `### ${f.key}\n${f.value}`).join('\n\n');
+      navigator.clipboard?.writeText(txt);
+    }
+    window.__loomShowPayload = showPayload;
+    onMounted(() => window.addEventListener('keydown', onPayloadKey));
+    onUnmounted(() => {
+      window.removeEventListener('keydown', onPayloadKey);
+      if (window.__loomShowPayload === showPayload) delete window.__loomShowPayload;
+    });
 
     function startSidebarResize(e) {
       sidebarDragging.value = true;
@@ -2530,7 +2590,8 @@ const app = createApp({
              tokenStats, fmtCost, fmtCostSmall,
              resolvePostTool,
              settingsOpen, settingsDraft, settingsChanged, browseFolder, saveSettings,
-             pathWarnings };
+             pathWarnings,
+             payloadModal, closePayload, copyPayloadField, copyPayloadAll };
   }
 });
 app.mount('#app');

@@ -1525,6 +1525,91 @@ input, select { font-family: inherit; }
   max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.25);
   text-align: center;
 }
+
+/* ── Payload large-view modal ──────────────────────────────────── */
+.pl-modal {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(15, 23, 42, .55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px;
+}
+.pl-modal__panel {
+  background: var(--bg-white); border-radius: 10px;
+  width: min(1100px, 95vw); height: min(85vh, 900px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,.35);
+  overflow: hidden;
+}
+.pl-modal__hdr {
+  display: grid; grid-template-columns: 1fr auto;
+  grid-template-areas: "title actions" "subtitle actions";
+  gap: 2px 12px;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, var(--agent-bg) 0%, #fff 100%);
+}
+.pl-modal__title {
+  grid-area: title;
+  font-size: 15px; font-weight: 700; color: var(--agent);
+  font-family: var(--font-mono);
+}
+.pl-modal__subtitle {
+  grid-area: subtitle;
+  font-size: 11px; color: var(--text-2); font-family: var(--font-mono);
+}
+.pl-modal__actions { grid-area: actions; display: flex; gap: 8px; align-items: center; }
+.pl-modal__btn {
+  font-size: 11px; padding: 6px 12px; border-radius: 5px;
+  border: 1px solid var(--border-2); background: #fff; cursor: pointer;
+  color: var(--text-1);
+}
+.pl-modal__btn:hover { border-color: var(--agent); color: var(--agent); }
+.pl-modal__btn--close {
+  font-size: 18px; line-height: 1; padding: 2px 10px; font-weight: 700;
+  color: var(--text-2);
+}
+.pl-modal__body {
+  flex: 1; overflow: auto; padding: 16px 20px;
+  background: #f8fafc;
+}
+.pl-modal__field {
+  background: #fff; border: 1px solid var(--border); border-radius: 6px;
+  margin-bottom: 12px; overflow: hidden;
+}
+.pl-modal__field-hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: #f1f5f9;
+  border-bottom: 1px solid var(--border);
+}
+.pl-modal__key {
+  font-size: 11px; font-weight: 700; font-family: var(--font-mono);
+  color: var(--text-2); text-transform: uppercase; letter-spacing: .04em;
+  flex: 1;
+}
+.pl-modal__copy {
+  font-size: 10px; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid var(--border-2); background: #fff; cursor: pointer;
+  color: var(--text-2);
+}
+.pl-modal__copy:hover { color: var(--agent); border-color: var(--agent); }
+.pl-modal__val {
+  margin: 0; padding: 12px 14px;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word;
+  color: var(--text-1);
+}
+.pl-modal__empty {
+  padding: 24px; text-align: center; font-size: 12px; color: var(--text-3);
+  font-style: italic;
+}
+
+/* "Open large" button (appears inside .sa-inj header) */
+.sa-inj__open {
+  font-size: 10px; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid var(--agent); background: #fff; color: var(--agent);
+  cursor: pointer; margin-left: auto; font-weight: 600;
+}
+.sa-inj__open:hover { background: var(--agent); color: #fff; }
+.sa-inj__hdr { display: flex; align-items: center; gap: 8px; }
 .revoke-modal__icon { font-size: 36px; margin-bottom: 10px; }
 .revoke-modal__title { font-size: 16px; font-weight: 700; color: var(--text); margin: 0 0 10px; }
 .revoke-modal__body { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 22px; }
@@ -2085,6 +2170,30 @@ input, select { font-family: inherit; }
           <span v-if="revokedArchiving">Archiving…</span>
           <span v-else>Archive &amp; Close</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payload large-view modal -->
+  <div v-if="payloadModal.open" class="pl-modal" @click.self="closePayload">
+    <div class="pl-modal__panel" role="dialog" aria-modal="true">
+      <div class="pl-modal__hdr">
+        <div class="pl-modal__title">{{ payloadModal.title }}</div>
+        <div v-if="payloadModal.subtitle" class="pl-modal__subtitle">{{ payloadModal.subtitle }}</div>
+        <div class="pl-modal__actions">
+          <button class="pl-modal__btn" @click="copyPayloadAll" title="Copy all fields to clipboard">Copy all</button>
+          <button class="pl-modal__btn pl-modal__btn--close" @click="closePayload" title="Close (Esc)">&times;</button>
+        </div>
+      </div>
+      <div class="pl-modal__body">
+        <div v-for="f in payloadModal.fields" :key="f.key" class="pl-modal__field">
+          <div class="pl-modal__field-hdr">
+            <span class="pl-modal__key">{{ f.key }}</span>
+            <button class="pl-modal__copy" @click="copyPayloadField(f.value)" title="Copy this field">Copy</button>
+          </div>
+          <pre class="pl-modal__val">{{ f.value }}</pre>
+        </div>
+        <div v-if="!payloadModal.fields.length" class="pl-modal__empty">No fields recorded.</div>
       </div>
     </div>
   </div>
