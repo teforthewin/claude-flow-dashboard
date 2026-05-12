@@ -17,10 +17,10 @@ function formatModel(raw) {
 
 function modelClass(raw) {
   const s = String(raw || '').toLowerCase();
-  if (s.includes('opus'))   return 'model-tag model-tag--opus';
-  if (s.includes('sonnet')) return 'model-tag model-tag--sonnet';
-  if (s.includes('haiku'))  return 'model-tag model-tag--haiku';
-  return 'model-tag';
+  if (s.includes('opus'))   return 'model-dot model-dot--opus';
+  if (s.includes('sonnet')) return 'model-dot model-dot--sonnet';
+  if (s.includes('haiku'))  return 'model-dot model-dot--haiku';
+  return 'model-dot';
 }
 
 function fmtK(n) {
@@ -1159,8 +1159,8 @@ const SubAgentFlowView = {
               <div class="sa-agent-call__icon">A</div>
               <div class="sa-agent-call__body">
                 <div class="sa-agent-call__type">
+                  <span v-if="item.sess.info?.model" :class="modelClass(item.sess.info.model)" :title="formatModel(item.sess.info.model)"></span>
                   <span>{{ item.agentType }}</span>
-                  <span v-if="item.sess.info?.model" :class="modelClass(item.sess.info.model)" :title="'Model: '+item.sess.info.model">{{ formatModel(item.sess.info.model) }}</span>
                 </div>
                 <div v-if="item.sess.info?.attribution_skill" class="sa-agent-call__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ item.sess.info.attribution_skill }}</div>
                 <div v-if="item.label" class="sa-agent-call__label" :title="item.label">{{ item.label }}</div>
@@ -1238,8 +1238,8 @@ const TeamView = {
         <div v-for="s in teamSessions" :key="s.id"
              :class="['tm-card', expanded.has(s.id) ? 'tm-card--expanded' : '']">
           <div class="tm-card__hdr" @click="toggle(s.id)">
+            <span v-if="s.info.model" :class="modelClass(s.info.model)" :title="formatModel(s.info.model)"></span>
             <span class="tm-card__agent">{{ s.info.agent_name || s.info.agent_description || 'Sub-agent' }}</span>
-            <span v-if="s.info.model" :class="modelClass(s.info.model)" :title="'Model: '+s.info.model">{{ formatModel(s.info.model) }}</span>
             <span v-if="s.info.attribution_skill" class="tm-card__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ s.info.attribution_skill }}</span>
             <span v-if="s.info.is_active" class="tm-card__live">LIVE</span>
             <span class="tm-card__stats">{{ s.info.event_count }}ev</span>
