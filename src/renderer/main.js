@@ -5,6 +5,19 @@ function openPayloadModal(title, subtitle, fields) {
   if (window.__loomShowPayload) window.__loomShowPayload(title, subtitle, fields);
 }
 
+function resolveSubAgentModel(node, sessionDescMap) {
+  if (!node) return '';
+  const inputModel = node?.input?.model;
+  if (inputModel) return inputModel;
+  const map = sessionDescMap || window.__loomSessionDescMap;
+  if (!map || !window.__loomSessionInfo) return '';
+  const desc = String(node?.input?.description || '').trim();
+  if (!desc) return '';
+  const sid = map.get(desc);
+  if (!sid) return '';
+  return window.__loomSessionInfo(sid)?.model || '';
+}
+
 function formatModel(raw) {
   if (!raw) return '';
   const s = String(raw).toLowerCase();
@@ -709,7 +722,8 @@ const FlowNode = {
              tok, totalIn, totalOut, hasTok, label, desc, resp, tagClass, answerExcerpt,
              toggle, goParent, fmtK, fmtT,
              childGroups, collapsedGroups, toggleGroup, cmdSummary,
-             injOpen, toggleInj, injFields, openPayloadModal };
+             injOpen, toggleInj, injFields, openPayloadModal,
+             formatModel, modelClass, resolveSubAgentModel };
   },
   template: `
     <div :id="'node-'+node.id">
@@ -718,6 +732,9 @@ const FlowNode = {
       <div v-if="isAgent" class="n-agent">
         <div class="n-agent__hdr" @click="toggle">
           <div class="n-agent__icon">A</div>
+          <span v-if="resolveSubAgentModel(node)"
+                :class="modelClass(resolveSubAgentModel(node))"
+                :title="formatModel(resolveSubAgentModel(node))"></span>
           <span class="n-agent__title">{{ label }}</span>
           <span class="n-agent__desc" v-if="desc">{{ desc }}</span>
           <div class="n-agent__meta">
@@ -966,7 +983,7 @@ const ProcessNode = {
       return out;
     });
 
-    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, skillGroups, label, desc, taskClass, toolIcon, childGroups, childTree, injOpen, toggleInj, injFields, openPayloadModal };
+    return { isAgent, isSkill, isContainer, isUser, isSkillListing, skillsOpen, skillGroups, label, desc, taskClass, toolIcon, childGroups, childTree, injOpen, toggleInj, injFields, openPayloadModal, formatModel, modelClass, resolveSubAgentModel };
   },
   template: `
     <div class="bp-flow">
@@ -976,6 +993,9 @@ const ProcessNode = {
           <div :class="['bp-subprocess__icon', isAgent ? 'bp-subprocess__icon--agent' : 'bp-subprocess__icon--skill']">
             {{ isAgent ? 'A' : 'S' }}
           </div>
+          <span v-if="isAgent && resolveSubAgentModel(node, sessionDescMap)"
+                :class="modelClass(resolveSubAgentModel(node, sessionDescMap))"
+                :title="formatModel(resolveSubAgentModel(node, sessionDescMap))"></span>
           <span class="bp-subprocess__name">{{ label }}</span>
           <span v-if="desc" class="bp-subprocess__desc">{{ desc }}</span>
           <span v-if="isSkill && node.invokerChain && node.invokerChain.length" class="bp-task__invoker" style="margin-left:8px">by: {{ node.invokerChain.join(' › ') }}</span>
@@ -1047,6 +1067,9 @@ const ProcessNode = {
            :title="label + (node.invokerChain ? '\\nInvoked by: ' + node.invokerChain.join(' › ') : '') + (node.ts ? '\\nat: ' + node.ts.slice(11,19) : '')">
         <div class="bp-task__row">
           <div class="bp-task__icon">{{ toolIcon(node.tool) }}</div>
+          <span v-if="isAgent && resolveSubAgentModel(node, sessionDescMap)"
+                :class="modelClass(resolveSubAgentModel(node, sessionDescMap))"
+                :title="formatModel(resolveSubAgentModel(node, sessionDescMap))"></span>
           <div class="bp-task__body">
             <div v-if="node.tool !== 'User' && node.tool !== 'Command'" class="bp-task__type">{{ node.tool }}</div>
             <div class="bp-task__label">{{ label || node.cmd || '—' }}</div>
@@ -1327,7 +1350,8 @@ const StepLane = {
 
     return { steps, toggle, isOpen, stepNum, navigate, agentChildSession, agentChildSessionId,
              aggregate, getLabelFor, getDescFor, agentType, groupSkills, fmtT, fmtK, fmtDur,
-             injOpen, toggleInj, injFieldsFor, openPayloadModal };
+             injOpen, toggleInj, injFieldsFor, openPayloadModal,
+             formatModel, modelClass, resolveSubAgentModel };
   },
   template: `
     <div class="sl-lane">
@@ -1397,6 +1421,9 @@ const StepLane = {
           <div class="sl-step__body">
             <div class="sl-step__hdr" @click="toggle('s'+i)">
               <span class="sl-step__kind">{{ s.nodes[0].tool === 'Skill' ? 'SKILL' : 'SUB-AGENT' }}</span>
+              <span v-if="s.nodes[0].tool==='Agent' && resolveSubAgentModel(s.nodes[0], sessionDescMap)"
+                    :class="modelClass(resolveSubAgentModel(s.nodes[0], sessionDescMap))"
+                    :title="formatModel(resolveSubAgentModel(s.nodes[0], sessionDescMap))"></span>
               <span class="sl-step__title">{{ getLabelFor(s.nodes[0]) }}</span>
               <span v-if="getDescFor(s.nodes[0])" class="sl-step__desc-inline">— {{ getDescFor(s.nodes[0]) }}</span>
               <span v-if="s.nodes[0].tool==='Skill' && s.nodes[0].invokerChain && s.nodes[0].invokerChain.length"
@@ -1463,6 +1490,9 @@ const StepLane = {
               <div class="sl-cols">
                 <div v-for="(n, ni) in s.nodes" :key="n.id" class="sl-col">
                   <div class="sl-col__hdr">
+                    <span v-if="resolveSubAgentModel(n, sessionDescMap)"
+                          :class="modelClass(resolveSubAgentModel(n, sessionDescMap))"
+                          :title="formatModel(resolveSubAgentModel(n, sessionDescMap))"></span>
                     <span class="sl-col__type">{{ agentType(n) }}</span>
                     <button v-if="injFieldsFor(n).length"
                             class="sa-inj-btn" style="margin-left:auto" @click.stop="toggleInj(n.id, $event)"
@@ -1855,6 +1885,7 @@ const app = createApp({
     onUnmounted(() => {
       window.removeEventListener('keydown', onPayloadKey);
       if (window.__loomShowPayload === showPayload) delete window.__loomShowPayload;
+      if (window.__loomSessionInfo) delete window.__loomSessionInfo;
     });
 
     function startSidebarResize(e) {
@@ -2172,6 +2203,11 @@ const app = createApp({
       }
       return map;
     });
+    // Expose the active parent session's desc → sid map so deep Flow
+    // renderers can resolve a sub-agent's model without prop-drilling.
+    watch(childSessionDescMap, (m) => {
+      window.__loomSessionDescMap = m || null;
+    }, { immediate: true });
 
     const isTeamLead = computed(() => {
       const info = sessionMap.value.get(activeSession.value);
@@ -2253,6 +2289,12 @@ const app = createApp({
       for (const s of sessions.value) map.set(s.session_id, s);
       return map;
     });
+
+    // Global lookup so deep Flow renderers can resolve a sub-agent's model
+    // without prop-drilling sessionMap through 5 layers.
+    watch(sessionMap, (m) => {
+      window.__loomSessionInfo = (sid) => m.get(sid) || null;
+    }, { immediate: true });
 
     const expandedParents = reactive({});
     function toggleParentExpand(id) {
