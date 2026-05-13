@@ -734,7 +734,7 @@ const FlowNode = {
           <div class="n-agent__icon">A</div>
           <span v-if="resolveSubAgentModel(node)"
                 :class="modelClass(resolveSubAgentModel(node))"
-                :title="formatModel(resolveSubAgentModel(node))"></span>
+                :data-tip="formatModel(resolveSubAgentModel(node))"></span>
           <span class="n-agent__title">{{ label }}</span>
           <span class="n-agent__desc" v-if="desc">{{ desc }}</span>
           <div class="n-agent__meta">
@@ -995,7 +995,7 @@ const ProcessNode = {
           </div>
           <span v-if="isAgent && resolveSubAgentModel(node, sessionDescMap)"
                 :class="modelClass(resolveSubAgentModel(node, sessionDescMap))"
-                :title="formatModel(resolveSubAgentModel(node, sessionDescMap))"></span>
+                :data-tip="formatModel(resolveSubAgentModel(node, sessionDescMap))"></span>
           <span class="bp-subprocess__name">{{ label }}</span>
           <span v-if="desc" class="bp-subprocess__desc">{{ desc }}</span>
           <span v-if="isSkill && node.invokerChain && node.invokerChain.length" class="bp-task__invoker" style="margin-left:8px">by: {{ node.invokerChain.join(' › ') }}</span>
@@ -1069,7 +1069,7 @@ const ProcessNode = {
           <div class="bp-task__icon">{{ toolIcon(node.tool) }}</div>
           <span v-if="isAgent && resolveSubAgentModel(node, sessionDescMap)"
                 :class="modelClass(resolveSubAgentModel(node, sessionDescMap))"
-                :title="formatModel(resolveSubAgentModel(node, sessionDescMap))"></span>
+                :data-tip="formatModel(resolveSubAgentModel(node, sessionDescMap))"></span>
           <div class="bp-task__body">
             <div v-if="node.tool !== 'User' && node.tool !== 'Command'" class="bp-task__type">{{ node.tool }}</div>
             <div class="bp-task__label">{{ label || node.cmd || '—' }}</div>
@@ -1182,7 +1182,7 @@ const SubAgentFlowView = {
               <div class="sa-agent-call__icon">A</div>
               <div class="sa-agent-call__body">
                 <div class="sa-agent-call__type">
-                  <span v-if="item.sess.info?.model" :class="modelClass(item.sess.info.model)" :title="formatModel(item.sess.info.model)"></span>
+                  <span v-if="item.sess.info?.model" :class="modelClass(item.sess.info.model)" :data-tip="formatModel(item.sess.info.model)"></span>
                   <span>{{ item.agentType }}</span>
                 </div>
                 <div v-if="item.sess.info?.attribution_skill" class="sa-agent-call__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ item.sess.info.attribution_skill }}</div>
@@ -1261,7 +1261,7 @@ const TeamView = {
         <div v-for="s in teamSessions" :key="s.id"
              :class="['tm-card', expanded.has(s.id) ? 'tm-card--expanded' : '']">
           <div class="tm-card__hdr" @click="toggle(s.id)">
-            <span v-if="s.info.model" :class="modelClass(s.info.model)" :title="formatModel(s.info.model)"></span>
+            <span v-if="s.info.model" :class="modelClass(s.info.model)" :data-tip="formatModel(s.info.model)"></span>
             <span class="tm-card__agent">{{ s.info.agent_name || s.info.agent_description || 'Sub-agent' }}</span>
             <span v-if="s.info.attribution_skill" class="tm-card__skill" :title="'Skill running this sub-agent'">&#x1F9E9; {{ s.info.attribution_skill }}</span>
             <span v-if="s.info.is_active" class="tm-card__live">LIVE</span>
@@ -1423,7 +1423,7 @@ const StepLane = {
               <span class="sl-step__kind">{{ s.nodes[0].tool === 'Skill' ? 'SKILL' : 'SUB-AGENT' }}</span>
               <span v-if="s.nodes[0].tool==='Agent' && resolveSubAgentModel(s.nodes[0], sessionDescMap)"
                     :class="modelClass(resolveSubAgentModel(s.nodes[0], sessionDescMap))"
-                    :title="formatModel(resolveSubAgentModel(s.nodes[0], sessionDescMap))"></span>
+                    :data-tip="formatModel(resolveSubAgentModel(s.nodes[0], sessionDescMap))"></span>
               <span class="sl-step__title">{{ getLabelFor(s.nodes[0]) }}</span>
               <span v-if="getDescFor(s.nodes[0])" class="sl-step__desc-inline">— {{ getDescFor(s.nodes[0]) }}</span>
               <span v-if="s.nodes[0].tool==='Skill' && s.nodes[0].invokerChain && s.nodes[0].invokerChain.length"
@@ -1492,7 +1492,7 @@ const StepLane = {
                   <div class="sl-col__hdr">
                     <span v-if="resolveSubAgentModel(n, sessionDescMap)"
                           :class="modelClass(resolveSubAgentModel(n, sessionDescMap))"
-                          :title="formatModel(resolveSubAgentModel(n, sessionDescMap))"></span>
+                          :data-tip="formatModel(resolveSubAgentModel(n, sessionDescMap))"></span>
                     <span class="sl-col__type">{{ agentType(n) }}</span>
                     <button v-if="injFieldsFor(n).length"
                             class="sa-inj-btn" style="margin-left:auto" @click.stop="toggleInj(n.id, $event)"

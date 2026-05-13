@@ -1529,7 +1529,7 @@ input, select { font-family: inherit; }
 /* ── Model dot (small color indicator, name shown on hover) ──── */
 .model-dot {
   display: inline-block;
-  width: 8px; height: 8px;
+  width: 10px; height: 10px;
   border-radius: 50%;
   margin-right: 6px;
   flex-shrink: 0;
@@ -1537,10 +1537,40 @@ input, select { font-family: inherit; }
   background: #94a3b8;
   border: 1px solid rgba(0,0,0,.08);
   cursor: help;
+  position: relative;
 }
 .model-dot--opus   { background: #7c3aed; }
 .model-dot--sonnet { background: #2563eb; }
 .model-dot--haiku  { background: #16a34a; }
+.model-dot[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, .96);
+  color: #fff;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+  box-shadow: 0 4px 14px rgba(0,0,0,.25);
+}
+.model-dot[data-tip]:hover::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(15, 23, 42, .96);
+  pointer-events: none;
+  z-index: 9999;
+}
 
 /* ── Payload large-view modal ──────────────────────────────────── */
 .pl-modal {
@@ -1710,7 +1740,7 @@ input, select { font-family: inherit; }
                          :checked="selectedSessions.has(s.session_id)"
                          @click.stop="toggleSessionSelect(s.session_id)" />
                   <span v-if="s.is_active" class="sess__live">LIVE</span>
-                  <span v-if="s.model" :class="modelClass(s.model)" :title="formatModel(s.model)"></span>
+                  <span v-if="s.model" :class="modelClass(s.model)" :data-tip="formatModel(s.model)"></span>
                   <span class="sess__title">{{ s.title || timeOf(s.first_ts) || s.session_id.slice(0,8) }}</span>
                   <button v-if="!selectMode && s.child_ids?.length" class="sess__children-btn"
                           @click.stop="toggleParentExpand(s.session_id)">
@@ -1732,7 +1762,7 @@ input, select { font-family: inherit; }
                              @click.stop="toggleSessionSelect(childId)" />
                       <span class="sess__child-icon">⤷</span>
                       <span v-if="sessionMap.get(childId).is_active" class="sess__live">LIVE</span>
-                      <span v-if="sessionMap.get(childId).model" :class="modelClass(sessionMap.get(childId).model)" :title="formatModel(sessionMap.get(childId).model)"></span>
+                      <span v-if="sessionMap.get(childId).model" :class="modelClass(sessionMap.get(childId).model)" :data-tip="formatModel(sessionMap.get(childId).model)"></span>
                       <span class="sess__child-title">{{ sessionMap.get(childId).title || sessionMap.get(childId).agent_description || sessionMap.get(childId).agent_name || timeOf(sessionMap.get(childId).first_ts) }}</span>
                       <button v-if="!selectMode" class="sess__copy"
                               @click.stop="copySessionId(childId, $event)"
@@ -1794,7 +1824,7 @@ input, select { font-family: inherit; }
       <div class="session-title-bar" v-if="sessionTitle">
         <span v-if="sessionMap.get(activeSession)?.model"
               :class="modelClass(sessionMap.get(activeSession).model)"
-              :title="formatModel(sessionMap.get(activeSession).model)"></span>
+              :data-tip="formatModel(sessionMap.get(activeSession).model)"></span>
         <span class="session-title-bar__text">{{ sessionTitle }}</span>
         <span class="session-title-bar__id" v-if="activeSession"
               :title="'Click to copy: ' + activeSession"
