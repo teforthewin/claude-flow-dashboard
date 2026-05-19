@@ -30,7 +30,7 @@
     "vue": "^3.4.0"
   },
   "devDependencies": {
-    "electron": "^31.0.0",
+    "electron": "^39.8.5",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
     "typescript": "^5.5.2",
