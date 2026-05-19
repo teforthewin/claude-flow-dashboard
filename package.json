@@ -2,6 +2,10 @@
   "name": "loomscope",
   "version": "1.0.3",
   "description": "LoomScope — a viewer onto woven Claude agent threads",
+  "author": {
+    "name": "EasyPark Group",
+    "email": "noreply@easypark.net"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev-rename-electron.js && electron-vite dev",
