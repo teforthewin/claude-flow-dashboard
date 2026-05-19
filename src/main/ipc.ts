@@ -3,8 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import archiver from 'archiver';
-import { SessionManager } from './SessionManager';
-import { TeamMonitor } from './TeamMonitor';
+import { SessionManager, TeamMonitor } from '../core';
 import { Settings } from './Settings';
 
 async function createTeamArchive(

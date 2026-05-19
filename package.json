@@ -1,16 +1,24 @@
 {
   "name": "loomscope",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "LoomScope — a viewer onto woven Claude agent threads",
   "author": {
     "name": "EasyPark Group",
     "email": "noreply@easypark.net"
   },
   "main": "out/main/index.js",
+  "bin": {
+    "loomscope": "out/cli/index.js"
+  },
   "scripts": {
     "dev": "node scripts/dev-rename-electron.js && electron-vite dev",
     "postinstall": "node scripts/dev-rename-electron.js || true",
     "build": "electron-vite build",
+    "build:api": "tsc -p tsconfig.api.json",
+    "build:renderer:web": "vite build -c vite.renderer.config.ts",
+    "build:all": "npm run build && npm run build:api",
+    "api:start": "node out/api/index.js",
+    "cli": "node out/cli/index.js",
     "preview": "electron-vite preview",
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac",
@@ -26,10 +34,14 @@
     "@types/archiver": "^7.0.0",
     "archiver": "^7.0.1",
     "chokidar": "^3.6.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "mermaid": "^11.14.0",
     "vue": "^3.4.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",

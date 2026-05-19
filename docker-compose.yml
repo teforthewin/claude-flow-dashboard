@@ -1,31 +1,42 @@
 services:
 
-  # ── Flow-dashboard web server ───────────────────────────────────────────────
-  # Reads Claude logs from the host and serves the live dashboard at :7842.
-  flow-dashboard:
+  # ── LoomScope REST API (Node) ───────────────────────────────────────────────
+  # Reads Claude logs from the host (mounted read-only) and exposes a REST + SSE
+  # API consumed by both the UI service and the `loomscope` CLI.
+  api:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: loomscope-dashboard
+      dockerfile: Dockerfile.api
+    image: loomscope-api:${LOOMSCOPE_VERSION:-latest}
+    container_name: loomscope-api
     ports:
-      - "${FLOW_SERVER_PORT:-7842}:7842"
+      - "${LOOMSCOPE_API_PORT:-7842}:7842"
     volumes:
-      # Mount the host Claude directory read-only so the server can tail logs
-      - ${CLAUDE_LOG_DIR:-~/.claude}:/root/.claude:ro
+      - ${CLAUDE_LOG_DIR:-~/.claude}:/host-claude:ro
+      - loomscope-data:/data
     environment:
-      - FLOW_LOG_DIR=/root/.claude/flow-logs
-      - FLOW_SERVER_PORT=7842
+      LOOMSCOPE_PORT: "7842"
+      LOOMSCOPE_DATA_DIR: "/data"
+      # Default to the mounted host volume; can be overridden via /api/settings.
+      LOOMSCOPE_PROJECTS_DIR: "/host-claude/projects"
+      LOOMSCOPE_TEAMS_DIR: "/host-claude/teams"
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python3", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:7842/')"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+
+  # ── LoomScope UI (nginx serving the renderer + proxying /api → api) ─────────
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    image: loomscope-ui:${LOOMSCOPE_VERSION:-latest}
+    container_name: loomscope-ui
+    ports:
+      - "${LOOMSCOPE_UI_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
 
   # ── Electron build (one-shot, exports artefacts to ./dist-linux/) ───────────
-  # Run with: docker compose run --rm loomscope-build
+  # Run with: docker compose --profile build run --rm loomscope-build
   loomscope-build:
     build:
       context: .
@@ -33,7 +44,9 @@ services:
       target: builder
     container_name: loomscope-build
     volumes:
-      # Write built artefacts back to the host
       - ./dist-linux:/build/dist
     profiles:
       - build
+
+volumes:
+  loomscope-data:

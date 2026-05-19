@@ -1,9 +1,7 @@
 import { app, BrowserWindow, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { SessionManager } from './SessionManager';
-import { LogWatcher } from './LogWatcher';
-import { TeamMonitor } from './TeamMonitor';
+import { SessionManager, LogWatcher, TeamMonitor } from '../core';
 import { Settings } from './Settings';
 import { registerIpcHandlers } from './ipc';
 

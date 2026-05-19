@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "composite": true,
     "target": "ES2022",
     "module": "CommonJS",
     "lib": ["ES2022"],
@@ -9,7 +8,11 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "outDir": "out",
-    "types": ["node"]
+    "rootDir": "src",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "declaration": false,
+    "sourceMap": false
   },
-  "include": ["electron.vite.config.*", "src/main/**/*", "src/preload/**/*", "src/core/**/*", "src/api/**/*", "src/cli/**/*"]
+  "include": ["src/core/**/*", "src/api/**/*", "src/cli/**/*"]
 }

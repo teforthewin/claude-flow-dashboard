@@ -1,0 +1,17 @@
+# Build stage — compile the renderer for the browser (no Electron needed)
+FROM node:20-bookworm-slim AS builder
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY scripts ./scripts
+RUN npm ci --no-audit --no-fund --ignore-scripts
+COPY tsconfig.json vite.renderer.config.ts ./
+COPY src/renderer ./src/renderer
+RUN npx vite build -c vite.renderer.config.ts
+
+# Runtime stage — nginx serving the static bundle + proxying /api → api service
+FROM nginx:1.27-alpine AS runtime
+COPY --from=builder /app/out/renderer /usr/share/nginx/html
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+EXPOSE 80
+HEALTHCHECK --interval=15s --timeout=5s --start-period=5s \
+  CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1

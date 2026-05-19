@@ -1,8 +1,13 @@
 # LoomScope — Deployment Guide
 
-This document covers how to build, package, and distribute LoomScope as an
-Electron desktop app on **macOS**, **Windows**, and **Linux** — both as
-installers and as fully portable bundles.
+This document covers the three ways LoomScope can be deployed:
+
+1. **Electron desktop app** — macOS / Windows / Linux, as installers or
+   portable bundles.
+2. **Docker-compose stack** — `ui` (nginx + browser bundle) + `api`
+   (Node REST server) sharing the host's `~/.claude` directory.
+3. **`loomscope` CLI** — Node binary built on top of the REST API, useful
+   for inspecting flows from the terminal or scripting in CI.
 
 ---
 
@@ -241,7 +246,114 @@ jobs:
 
 ---
 
-## 12. Quick reference
+## 12. Docker-compose (UI + REST API)
+
+The repo ships a two-service compose stack:
+
+| Service | Image                | Port (host) | Role                                                |
+| ------- | -------------------- | ----------- | --------------------------------------------------- |
+| `api`   | `loomscope-api`      | `7842`      | Node REST + SSE server reading `~/.claude` (RO)     |
+| `ui`    | `loomscope-ui`       | `8080`      | nginx serving the renderer + proxying `/api/*` → api |
+
+### 12.1 Build & run
+
+```bash
+# Build images
+docker compose build api ui
+
+# Start (detached)
+docker compose up -d api ui
+
+# Tail logs
+docker compose logs -f api ui
+
+# Stop
+docker compose down
+```
+
+Open the UI at <http://localhost:8080> and hit the API directly at
+<http://localhost:7842/api/health>.
+
+### 12.2 Configuration
+
+| Variable                | Default                | Notes                                       |
+| ----------------------- | ---------------------- | ------------------------------------------- |
+| `LOOMSCOPE_API_PORT`    | `7842`                 | Host port for the API container             |
+| `LOOMSCOPE_UI_PORT`     | `8080`                 | Host port for the nginx UI container        |
+| `CLAUDE_LOG_DIR`        | `~/.claude`            | Host path mounted read-only into the api     |
+| `LOOMSCOPE_VERSION`     | `latest`               | Image tag suffix                            |
+
+Inside the api container:
+
+| Env                       | Default                  | Purpose                                  |
+| ------------------------- | ------------------------ | ---------------------------------------- |
+| `LOOMSCOPE_PORT`          | `7842`                   | Listen port                              |
+| `LOOMSCOPE_DATA_DIR`      | `/data`                  | Persistent settings volume               |
+| `LOOMSCOPE_PROJECTS_DIR`  | `/host-claude/projects`  | Where to read session JSONL              |
+| `LOOMSCOPE_TEAMS_DIR`     | `/host-claude/teams`     | Where to read agent team inboxes         |
+| `LOOMSCOPE_STATIC_DIR`    | _(unset in docker)_      | If set, api also serves a static bundle  |
+
+### 12.3 REST API surface
+
+| Method | Path                              | Description                                 |
+| ------ | --------------------------------- | ------------------------------------------- |
+| GET    | `/api/health`                     | Liveness probe                              |
+| GET    | `/api/sessions`                   | List sessions (lightweight metadata)        |
+| GET    | `/api/sessions/:id`               | Full session + parsed entries               |
+| GET    | `/api/sessions/:id/stats`         | Token + tool usage stats                    |
+| GET    | `/api/sessions/:id/flow`          | Compact ordered step-by-step flow           |
+| POST   | `/api/sessions/delete`            | Body `{ids: [...]}` — delete sessions       |
+| POST   | `/api/sessions/reload`            | Reload from disk                            |
+| GET    | `/api/teams`                      | List agent teams                            |
+| GET    | `/api/teams/:name/messages`       | Inbox messages for a team                   |
+| GET    | `/api/settings`                   | Current settings                            |
+| PUT    | `/api/settings`                   | Patch settings                              |
+| GET    | `/api/settings/check`             | Verify directories exist                    |
+| GET    | `/api/events`                     | Server-Sent Events — live updates           |
+
+---
+
+## 13. `loomscope` CLI
+
+The CLI talks to the REST API over HTTP. Build it locally with:
+
+```bash
+npm run build:api
+node out/cli/index.js --help
+# Or after `npm link`: loomscope --help
+```
+
+Commands:
+
+```bash
+loomscope sessions               # list recent sessions
+loomscope flow <session-id>      # step-by-step flow (session id prefix OK)
+loomscope stats <session-id>     # token + tool stats
+loomscope teams                  # list agent teams
+```
+
+Configure the target API:
+
+```bash
+LOOMSCOPE_API=http://localhost:7842 loomscope flow 77a8
+```
+
+Session ids may be abbreviated to any unique prefix (≥ 4 chars). Example:
+
+```
+$ loomscope flow 77a8
+Flow for session 77a88bb2-76a1-4371-baf8-25123d4af05a (96 steps)
+
+2026-05-19 07:11:24  › User
+2026-05-19 07:11:24  $ SkillListing  32 skills
+2026-05-19 07:11:28  · Bash  ls /Users/alex/Documents/repos/agent-flow-front
+2026-05-19 07:11:31  · Read  /…/package.json
+...
+```
+
+---
+
+## 14. Quick reference
 
 ```bash
 # Dev
@@ -263,4 +375,14 @@ npm run dist:all
 
 # Publish to GitHub Releases
 GH_TOKEN=*** npm run dist:all -- --publish always
+
+# Docker stack
+docker compose build api ui
+docker compose up -d api ui
+# → UI on http://localhost:8080, API on http://localhost:7842
+
+# CLI
+npm run build:api
+node out/cli/index.js sessions
+node out/cli/index.js flow <session-id-prefix>
 ```

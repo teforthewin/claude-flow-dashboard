@@ -1,0 +1,27 @@
+# Build stage — compile TypeScript for core + api + cli
+FROM node:20-bookworm-slim AS builder
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY scripts ./scripts
+RUN npm ci --no-audit --no-fund --ignore-scripts
+COPY tsconfig.json tsconfig.api.json ./
+COPY src/core ./src/core
+COPY src/api ./src/api
+COPY src/cli ./src/cli
+RUN npx tsc -p tsconfig.api.json
+
+# Runtime stage — only what's needed to serve the REST API
+FROM node:20-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production \
+    LOOMSCOPE_PORT=7842 \
+    LOOMSCOPE_DATA_DIR=/data
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev --no-audit --no-fund --ignore-scripts && npm cache clean --force
+COPY --from=builder /app/out ./out
+RUN mkdir -p /data && useradd -r -u 10001 -g root loomscope && chown -R loomscope:root /data /app
+USER 10001
+EXPOSE 7842
+HEALTHCHECK --interval=15s --timeout=5s --start-period=5s \
+  CMD node -e "require('http').get('http://127.0.0.1:7842/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
+CMD ["node", "out/api/index.js"]
