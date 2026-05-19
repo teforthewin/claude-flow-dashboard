@@ -10,11 +10,29 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+const electronRoot = path.resolve(__dirname, '..', 'node_modules/electron');
+const electronDist = path.join(electronRoot, 'dist');
+
+// Some npm install paths (especially major-version bumps) skip Electron's
+// own postinstall, leaving node_modules/electron without its binary.
+// Re-run the upstream installer when the dist is missing so `npm run dev`
+// works straight after a fresh install.
+if (fs.existsSync(electronRoot) && !fs.existsSync(electronDist)) {
+  console.log('[dev-rename] Electron dist missing — running electron install.js');
+  const r = spawnSync(process.execPath, [path.join(electronRoot, 'install.js')], {
+    stdio: 'inherit',
+    cwd: electronRoot,
+  });
+  if (r.status !== 0) {
+    console.warn('[dev-rename] Electron install.js exited with', r.status);
+  }
+}
+
 if (process.platform !== 'darwin') process.exit(0);
 
 const APP_NAME = 'LoomScope';
 const APP_ID = 'com.loomscope.dev';
-const APP_DIR = path.resolve(__dirname, '..', 'node_modules/electron/dist/Electron.app');
+const APP_DIR = path.join(electronDist, 'Electron.app');
 const plistPath = path.join(APP_DIR, 'Contents/Info.plist');
 
 if (!fs.existsSync(plistPath)) {
