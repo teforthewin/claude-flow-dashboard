@@ -1,6 +1,6 @@
 {
   "name": "loomscope",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "LoomScope — a viewer onto woven Claude agent threads",
   "main": "out/main/index.js",
   "scripts": {
@@ -12,7 +12,11 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
     "dist:linux": "npm run build && electron-builder --linux",
-    "dist:all": "npm run build && electron-builder --mac --win --linux"
+    "dist:all": "npm run build && electron-builder --mac --win --linux",
+    "dist:portable": "npm run build && electron-builder --mac zip --win portable --linux AppImage",
+    "dist:portable:mac": "npm run build && electron-builder --mac zip",
+    "dist:portable:win": "npm run build && electron-builder --win portable",
+    "dist:portable:linux": "npm run build && electron-builder --linux AppImage"
   },
   "dependencies": {
     "@types/archiver": "^7.0.0",
@@ -64,7 +68,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
     },
     "win": {
       "icon": "build/icon.png",
@@ -72,16 +77,21 @@
         {
           "target": "nsis",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
           ]
         },
         {
           "target": "portable",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
           ]
         }
       ]
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -95,16 +105,21 @@
         {
           "target": "AppImage",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
           ]
         },
         {
           "target": "deb",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
           ]
         }
       ]
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}-portable-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",
