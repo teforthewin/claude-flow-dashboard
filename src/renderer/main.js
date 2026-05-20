@@ -2567,12 +2567,57 @@ const app = createApp({
       connectEntryListener(id);
     }
 
+    // Merge a streamed entry into stats.value so the Tokens tab updates live.
+    // Why: SessionManager keeps stats current in main, but only entries are pushed
+    // over IPC — without this, opening a session before tokens are recorded leaves
+    // the Tokens tab stuck on "No token data".
+    function mergeEntryIntoStats(entry) {
+      if (!stats.value) {
+        stats.value = {
+          tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0 },
+          tools: {},
+          timeline: [],
+          agentRole: '',
+        };
+      }
+      if (entry.tokens) {
+        const t = stats.value.tokens;
+        t.input        += entry.tokens.input        || 0;
+        t.output       += entry.tokens.output       || 0;
+        t.cache_read   += entry.tokens.cache_read   || 0;
+        t.cache_create += entry.tokens.cache_create || 0;
+      }
+      if (entry.event === 'pre' && entry.tool) {
+        stats.value.tools[entry.tool] = (stats.value.tools[entry.tool] || 0) + 1;
+      }
+      // Approximate timeline: the streamed entry only knows its own tool, so we push a
+      // single-tool row. Skills/Agents breakdowns work because the entry that carries
+      // tokens is the first tool_use of its assistant turn — which for Skill/Agent
+      // calls is the relevant tool itself.
+      if (entry.tokens && (entry.tokens.input || entry.tokens.output || entry.tokens.cache_read || entry.tokens.cache_create)) {
+        const tools = entry.tool ? [entry.tool] : [];
+        const skills = entry.tool === 'Skill' && entry.input?.skill ? [String(entry.input.skill)] : [];
+        const agents = entry.tool === 'Agent' && (entry.input?.subagent_type || entry.input?.agent)
+          ? [String(entry.input.subagent_type || entry.input.agent || 'general-purpose')]
+          : [];
+        stats.value.timeline.push({
+          ts: entry.ts || '',
+          input: entry.tokens.input || 0,
+          output: entry.tokens.output || 0,
+          cache_read: entry.tokens.cache_read || 0,
+          cache_create: entry.tokens.cache_create || 0,
+          tools, skills, agents,
+        });
+      }
+    }
+
     function connectEntryListener(id) {
       cleanupEntryListener = window.electronAPI.onSessionEntry((data) => {
         if (data.sessionId !== id) return;
         const entry = data.entry;
         entries.value = [...entries.value, entry];
         treeData.value = buildTree(entries.value); treeVersion.value++;
+        mergeEntryIntoStats(entry);
         if (autoScroll.value) {
           nextTick(()=>{
             if (tab.value==='events' && eventsTable.value) eventsTable.value.scrollTop=eventsTable.value.scrollHeight;
