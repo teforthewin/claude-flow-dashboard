@@ -72,6 +72,7 @@
     checkSettings: function () { return json('GET', '/settings/check'); },
     setSettings: function (patch) { return json('PUT', '/settings', patch); },
     selectFolder: function () { return Promise.resolve(null); },
+    openFolder: function () { return Promise.resolve({ ok: false }); },
     onSettingsChanged: function () { return function () {}; },
   };
 

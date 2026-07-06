@@ -2166,6 +2166,7 @@ input, select { font-family: inherit; }
           <label class="settings-label">Claude Projects Folder</label>
           <div class="settings-input-row">
             <input class="settings-input" :value="settingsDraft.projectsDir" readonly />
+            <button class="settings-browse" @click="openFolder(settingsDraft.projectsDir)" title="Open in file explorer">Open</button>
             <button class="settings-browse" @click="browseFolder('projectsDir')">Browse</button>
           </div>
           <div class="settings-hint">Where Claude Code writes session logs (default: ~/.claude/projects)</div>
@@ -2174,6 +2175,7 @@ input, select { font-family: inherit; }
           <label class="settings-label">Claude Teams Folder</label>
           <div class="settings-input-row">
             <input class="settings-input" :value="settingsDraft.teamsDir" readonly />
+            <button class="settings-browse" @click="openFolder(settingsDraft.teamsDir)" title="Open in file explorer">Open</button>
             <button class="settings-browse" @click="browseFolder('teamsDir')">Browse</button>
           </div>
           <div class="settings-hint">Where Claude Code stores team sessions (default: ~/.claude/teams)</div>

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron';
+import { ipcMain, dialog, shell, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -81,6 +81,12 @@ export function registerIpcHandlers(manager: SessionManager, teamMonitor: TeamMo
       projectsDir: fs.existsSync(s.projectsDir),
       teamsDir: fs.existsSync(s.teamsDir),
     };
+  });
+
+  ipcMain.handle('settings:open-folder', async (_e, dir: string) => {
+    if (!dir || !fs.existsSync(dir)) return { ok: false };
+    const err = await shell.openPath(dir);
+    return { ok: !err };
   });
 
   ipcMain.handle('teams:list', () => teamMonitor.getTeams());

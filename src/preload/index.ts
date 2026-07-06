@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   selectFolder: () => ipcRenderer.invoke('settings:select-folder'),
 
+  openFolder: (dir: string) => ipcRenderer.invoke('settings:open-folder', dir),
+
   onSettingsChanged: (callback: (settings: Record<string, string>) => void) => {
     const handler = (_: Electron.IpcRendererEvent, settings: Record<string, string>) => callback(settings);
     ipcRenderer.on('settings:changed', handler);

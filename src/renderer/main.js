@@ -1993,6 +1993,11 @@ const app = createApp({
       if (folder) settingsDraft.value = { ...settingsDraft.value, [key]: folder };
     }
 
+    async function openFolder(dir) {
+      if (!dir) return;
+      try { await window.electronAPI.openFolder(dir); } catch(e) {}
+    }
+
     async function saveSettings() {
       await window.electronAPI.setSettings({ ...settingsDraft.value });
       settingsSaved.value = { ...settingsDraft.value };
@@ -2759,7 +2764,7 @@ const app = createApp({
              handleRevokedClose, handleRevokedArchive,
              tokenStats, fmtCost, fmtCostSmall,
              resolvePostTool,
-             settingsOpen, settingsDraft, settingsChanged, browseFolder, saveSettings,
+             settingsOpen, settingsDraft, settingsChanged, browseFolder, openFolder, saveSettings,
              pathWarnings,
              payloadModal, closePayload, copyPayloadField, copyPayloadAll,
              formatModel, modelClass };
