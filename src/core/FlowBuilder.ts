@@ -67,7 +67,7 @@ export function buildFlow(entries: AppEntry[]): FlowStep[] {
     else event = 'tool';
     const summary =
       event === 'prompt'
-        ? truncate(String((e.input as Record<string, unknown>)?.text ?? ''))
+        ? truncate(String((e.input as Record<string, unknown>)?.message ?? ''))
         : event === 'command'
         ? truncate(e.cmd || '')
         : summarizeInput(e.tool, e.input);

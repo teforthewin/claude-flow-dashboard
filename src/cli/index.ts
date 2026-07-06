@@ -12,6 +12,29 @@ interface SessionInfo {
   first_ts: string;
   last_ts: string;
   model?: string;
+  title?: string;
+}
+
+interface BpmnProcess {
+  processId: string;
+  name: string;
+  elements: unknown[];
+  flows: unknown[];
+}
+
+interface SessionSummary {
+  session_id: string;
+  project: string;
+  title: string;
+  model: string;
+  model_counts: Record<string, number>;
+  start_ts: string;
+  stop_ts: string;
+  duration_ms: number;
+  duration_human: string;
+  tokens: { input: number; output: number; cache_read: number; cache_create: number };
+  tools: Record<string, number>;
+  bpmn: BpmnProcess;
 }
 
 interface FlowStep {
@@ -95,17 +118,33 @@ async function cmdSessionsList(): Promise<void> {
   if (list.length > 50) console.log(`… ${list.length - 50} more`);
 }
 
-async function resolveSessionId(prefix: string): Promise<string> {
-  if (prefix.length >= 32) return prefix;
+// Resolves a query that is either a session-id prefix (>= 4 chars, or a full
+// UUID) or a case-insensitive substring of a session's title.
+async function resolveSessionId(query: string): Promise<string> {
+  if (query.length >= 32) return query;
   const list = await request<SessionInfo[]>('/api/sessions');
-  const matches = list.filter((s) => s.session_id.startsWith(prefix));
-  if (!matches.length) throw new Error(`No session matches "${prefix}"`);
-  if (matches.length > 1) {
+
+  const idMatches = list.filter((s) => s.session_id.startsWith(query));
+  if (idMatches.length === 1) return idMatches[0].session_id;
+  if (idMatches.length > 1) {
     throw new Error(
-      `Ambiguous prefix "${prefix}" matches ${matches.length} sessions; provide more characters.`,
+      `Ambiguous id prefix "${query}" matches ${idMatches.length} sessions; provide more characters.`,
     );
   }
-  return matches[0].session_id;
+
+  const q = query.toLowerCase();
+  const titleMatches = list.filter((s) => (s.title || '').toLowerCase().includes(q));
+  if (!titleMatches.length) throw new Error(`No session matches "${query}"`);
+  if (titleMatches.length > 1) {
+    const preview = titleMatches
+      .slice(0, 5)
+      .map((s) => `  ${s.session_id.slice(0, 8)}  ${s.title}`)
+      .join('\n');
+    throw new Error(
+      `Ambiguous title "${query}" matches ${titleMatches.length} sessions:\n${preview}\nProvide a more specific title or a session id.`,
+    );
+  }
+  return titleMatches[0].session_id;
 }
 
 async function cmdFlow(prefix: string): Promise<void> {
@@ -154,6 +193,27 @@ async function cmdStats(prefix: string): Promise<void> {
   }
 }
 
+async function cmdSummary(query: string): Promise<void> {
+  const id = await resolveSessionId(query);
+  const s = await request<SessionSummary>(`/api/sessions/${encodeURIComponent(id)}/summary`);
+  console.log(`Session ${s.session_id}`);
+  console.log(`  Title:    ${s.title || '(untitled)'}`);
+  console.log(`  Project:  ${s.project}`);
+  console.log(`  Model:    ${s.model}${
+    Object.keys(s.model_counts).length > 1
+      ? '  (' + Object.entries(s.model_counts).map(([m, c]) => `${m}=${c}`).join(', ') + ')'
+      : ''
+  }`);
+  console.log(`  Start:    ${fmtTs(s.start_ts)}`);
+  console.log(`  Stop:     ${fmtTs(s.stop_ts)}`);
+  console.log(`  Duration: ${s.duration_human} (${s.duration_ms} ms)`);
+  console.log(
+    `  Tokens:   in=${s.tokens.input}  out=${s.tokens.output}  cache_read=${s.tokens.cache_read}  cache_create=${s.tokens.cache_create}`,
+  );
+  console.log('\nBPMN process (JSON):');
+  console.log(JSON.stringify(s.bpmn, null, 2));
+}
+
 async function cmdTeams(): Promise<void> {
   const teams = await request<Array<{ name: string; size?: number }>>('/api/teams');
   if (!teams.length) {
@@ -167,16 +227,21 @@ function help(): void {
   console.log(`loomscope — CLI for the LoomScope REST API
 
 Usage:
-  loomscope sessions               List recent sessions
-  loomscope flow <session-id>      Print step-by-step flow for a session
-  loomscope stats <session-id>     Print token + tool stats for a session
-  loomscope teams                  List agent teams
-  loomscope --help                 Show this help
+  loomscope sessions                     List recent sessions
+  loomscope flow <session-id-or-title>   Print step-by-step flow for a session
+  loomscope stats <session-id-or-title>  Print token + tool stats for a session
+  loomscope summary <session-id-or-title>
+                                          Print start/stop time, duration, token
+                                          stats, model used, and a JSON BPMN
+                                          breakdown of the session's phases
+  loomscope teams                        List agent teams
+  loomscope --help                       Show this help
 
 Environment:
   LOOMSCOPE_API   Base URL of the API server (default: ${BASE})
 
-Session ids may be abbreviated to any unique prefix (≥ 4 chars).`);
+Sessions may be identified by any unique session-id prefix (≥ 4 chars), a
+full session id, or a case-insensitive substring of the session's title.`);
 }
 
 async function main(): Promise<void> {
@@ -199,6 +264,10 @@ async function main(): Promise<void> {
       case 'stats':
         if (!rest[0]) throw new Error('stats requires a session id');
         await cmdStats(rest[0]);
+        return;
+      case 'summary':
+        if (!rest[0]) throw new Error('summary requires a session id or title');
+        await cmdSummary(rest[0]);
         return;
       case 'teams':
         await cmdTeams();

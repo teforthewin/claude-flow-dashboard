@@ -1546,7 +1546,7 @@ input, select { font-family: inherit; }
   content: attr(data-tip);
   position: absolute;
   top: calc(100% + 6px);
-  right: calc(100% + 6px);
+  left: 0;
   background: rgba(15, 23, 42, .96);
   color: #fff;
   font-size: 11px;
@@ -1703,64 +1703,59 @@ input, select { font-family: inherit; }
                v-model="sessionSearch" ref="searchInput" />
       </div>
       <div class="sidebar__list">
-        <template v-for="grp in filteredProjectGroups" :key="grp.project">
-          <div class="proj-hdr" @click="selectMode ? toggleProjectSelect(grp) : toggleProject(grp.project)">
+        <template v-for="row in sidebarRows" :key="row.key">
+          <div v-if="row.type === 'folder'" class="proj-hdr"
+               :style="{ paddingLeft: (12 + row.depth*14) + 'px', position: row.depth===0 ? 'sticky' : 'static' }"
+               @click="selectMode ? toggleFolderSelect(row.node) : toggleFolder(row.node.fullKey)">
             <input v-if="selectMode" type="checkbox" class="proj-hdr__check"
-                   :checked="isProjectFullySelected(grp)"
-                   :indeterminate.prop="isProjectPartiallySelected(grp)"
-                   @click.stop="toggleProjectSelect(grp)" />
-            <span v-else class="proj-hdr__chev">{{ collapsedProjects[grp.project] ? '\u25B6' : '\u25BC' }}</span>
+                   :checked="isFolderFullySelected(row.node)"
+                   :indeterminate.prop="isFolderPartiallySelected(row.node)"
+                   @click.stop="toggleFolderSelect(row.node)" />
+            <span v-else class="proj-hdr__chev">{{ collapsedFolders[row.node.fullKey] ? '▶' : '▼' }}</span>
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-              {{ grp.project || '(default)' }}
+              {{ row.node.label || '(default)' }}
             </span>
-            <span class="proj-hdr__count">{{ grp.sessions.length }}</span>
+            <span class="proj-hdr__count">{{ row.node.count }}</span>
           </div>
-          <template v-if="!collapsedProjects[grp.project]">
-            <template v-for="(dg, di) in groupByDate(grp.sessions)" :key="di">
-              <div class="date-hdr">{{ dg.label }}</div>
-              <template v-for="s in dg.sessions" :key="s.session_id">
-                <div :class="['sess',
-                     !selectMode && (s.session_id === activeSession || activeParentSession?.session_id === s.session_id) ? 'sess--active' : '',
-                     s.child_ids?.length ? 'sess--has-children' : '',
-                     s.child_ids?.length && expandedParents[s.session_id] ? 'sess--expanded' : '']"
-                     @click="selectMode ? toggleSessionSelect(s.session_id) : selectSession(s.session_id)">
-                  <input v-if="selectMode" type="checkbox" class="sess__check"
-                         :checked="selectedSessions.has(s.session_id)"
-                         @click.stop="toggleSessionSelect(s.session_id)" />
-                  <span v-if="s.is_active" class="sess__live">LIVE</span>
-                  <span v-if="s.model" :class="modelClass(s.model)" :data-tip="formatModel(s.model)"></span>
-                  <span class="sess__title">{{ s.title || timeOf(s.first_ts) || s.session_id.slice(0,8) }}</span>
-                  <button v-if="!selectMode && s.child_ids?.length" class="sess__children-btn"
-                          @click.stop="toggleParentExpand(s.session_id)">
-                    {{ expandedParents[s.session_id] ? '▼' : '▶' }} {{ s.child_ids.length }}
-                  </button>
-                  <button v-if="!selectMode" class="sess__copy"
-                          @click.stop="copySessionId(s.session_id, $event)"
-                          :title="'Copy session id: ' + s.session_id">{{ copiedSessionId === s.session_id ? '✓' : '⧉' }}</button>
-                  <button v-if="!selectMode" class="sess__del" @click.stop="deleteSingleSession(s.session_id)"
-                          title="Delete session">&times;</button>
-                </div>
-                <template v-if="s.child_ids?.length && expandedParents[s.session_id]">
-                  <template v-for="childId in s.child_ids" :key="childId">
-                    <div v-if="sessionMap.get(childId)"
-                         :class="['sess', 'sess--child', childId === activeSession && !selectMode ? 'sess--active' : '']"
-                         @click="selectMode ? toggleSessionSelect(childId) : selectSession(childId)">
-                      <input v-if="selectMode" type="checkbox" class="sess__check"
-                             :checked="selectedSessions.has(childId)"
-                             @click.stop="toggleSessionSelect(childId)" />
-                      <span class="sess__child-icon">⤷</span>
-                      <span v-if="sessionMap.get(childId).is_active" class="sess__live">LIVE</span>
-                      <span v-if="sessionMap.get(childId).model" :class="modelClass(sessionMap.get(childId).model)" :data-tip="formatModel(sessionMap.get(childId).model)"></span>
-                      <span class="sess__child-title">{{ sessionMap.get(childId).title || sessionMap.get(childId).agent_description || sessionMap.get(childId).agent_name || timeOf(sessionMap.get(childId).first_ts) }}</span>
-                      <button v-if="!selectMode" class="sess__copy"
-                              @click.stop="copySessionId(childId, $event)"
-                              :title="'Copy session id: ' + childId">{{ copiedSessionId === childId ? '✓' : '⧉' }}</button>
-                    </div>
-                  </template>
-                </template>
-              </template>
-            </template>
-          </template>
+          <div v-else-if="row.type === 'date'" class="date-hdr" :style="{ paddingLeft: (12 + row.depth*14) + 'px' }">{{ row.label }}</div>
+          <div v-else-if="row.type === 'session'"
+               :class="['sess',
+                    !selectMode && (row.session.session_id === activeSession || activeParentSession?.session_id === row.session.session_id) ? 'sess--active' : '',
+                    row.session.child_ids?.length ? 'sess--has-children' : '',
+                    row.session.child_ids?.length && expandedParents[row.session.session_id] ? 'sess--expanded' : '']"
+               :style="{ paddingLeft: (12 + row.depth*14) + 'px' }"
+               @click="selectMode ? toggleSessionSelect(row.session.session_id) : selectSession(row.session.session_id)">
+            <input v-if="selectMode" type="checkbox" class="sess__check"
+                   :checked="selectedSessions.has(row.session.session_id)"
+                   @click.stop="toggleSessionSelect(row.session.session_id)" />
+            <span v-if="row.session.is_active" class="sess__live">LIVE</span>
+            <span v-if="row.session.model" :class="modelClass(row.session.model)" :data-tip="formatModel(row.session.model)"></span>
+            <span class="sess__title">{{ row.session.title || timeOf(row.session.first_ts) || row.session.session_id.slice(0,8) }}</span>
+            <button v-if="!selectMode && row.session.child_ids?.length" class="sess__children-btn"
+                    @click.stop="toggleParentExpand(row.session.session_id)">
+              {{ expandedParents[row.session.session_id] ? '▼' : '▶' }} {{ row.session.child_ids.length }}
+            </button>
+            <button v-if="!selectMode" class="sess__copy"
+                    @click.stop="copySessionId(row.session.session_id, $event)"
+                    :title="'Copy session id: ' + row.session.session_id">{{ copiedSessionId === row.session.session_id ? '✓' : '⧉' }}</button>
+            <button v-if="!selectMode" class="sess__del" @click.stop="deleteSingleSession(row.session.session_id)"
+                    title="Delete session">&times;</button>
+          </div>
+          <div v-else-if="row.type === 'child'"
+               :class="['sess', 'sess--child', row.session.session_id === activeSession && !selectMode ? 'sess--active' : '']"
+               :style="{ paddingLeft: (24 + row.depth*14) + 'px' }"
+               @click="selectMode ? toggleSessionSelect(row.session.session_id) : selectSession(row.session.session_id)">
+            <input v-if="selectMode" type="checkbox" class="sess__check"
+                   :checked="selectedSessions.has(row.session.session_id)"
+                   @click.stop="toggleSessionSelect(row.session.session_id)" />
+            <span class="sess__child-icon">⤷</span>
+            <span v-if="row.session.is_active" class="sess__live">LIVE</span>
+            <span v-if="row.session.model" :class="modelClass(row.session.model)" :data-tip="formatModel(row.session.model)"></span>
+            <span class="sess__child-title">{{ row.session.title || row.session.agent_description || row.session.agent_name || timeOf(row.session.first_ts) }}</span>
+            <button v-if="!selectMode" class="sess__copy"
+                    @click.stop="copySessionId(row.session.session_id, $event)"
+                    :title="'Copy session id: ' + row.session.session_id">{{ copiedSessionId === row.session.session_id ? '✓' : '⧉' }}</button>
+          </div>
         </template>
         <div v-if="!sessions.length" class="empty" style="height:auto;padding:24px 12px;font-size:11px">
           No sessions yet

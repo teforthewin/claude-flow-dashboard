@@ -63,6 +63,12 @@ export async function createApiServer(opts: ApiServerOptions): Promise<ApiServer
     res.json({ session_id: s.session_id, steps: buildFlow(s.entries) });
   });
 
+  app.get('/api/sessions/:id/summary', (req, res) => {
+    const summary = manager.getSummary(req.params.id);
+    if (!summary) return res.status(404).json({ error: 'session not found' });
+    res.json(summary);
+  });
+
   app.post('/api/sessions/delete', (req, res) => {
     const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
     manager.deleteSessions(ids);

@@ -1948,7 +1948,7 @@ const app = createApp({
     const eventDirFilter = reactive({ pre: true, post: true, command: true, prompt: true });
     const eventSkillsOnly = ref(false);
     const openResps = reactive({});
-    const collapsedProjects = reactive({});
+    const collapsedFolders = reactive({});
     const selectMode = ref(false);
     const selectedSessions = ref(new Set());
     const eventsTable = ref(null);
@@ -2343,6 +2343,67 @@ const app = createApp({
                    .map(([project,sessions])=>({project,sessions}));
     });
 
+    // Turns the flat {project, sessions} groups into a folder tree by splitting each
+    // project's encoded path on '-' (Claude Code replaces '/' with '-' in project dir names).
+    // Chains of single-child folders are compacted into one "a / b / c" row, mirroring
+    // how VS Code's explorer collapses nested single-child directories.
+    function buildProjectTree(groups) {
+      const root = { name: '', fullKey: '', children: new Map(), ownSessions: [] };
+      for (const g of groups) {
+        const project = g.project || '';
+        const parts = project ? project.split('-').filter(Boolean) : ['(no project)'];
+        let node = root, keyAcc = '';
+        for (const part of parts) {
+          keyAcc = keyAcc ? keyAcc + '-' + part : part;
+          if (!node.children.has(part)) node.children.set(part, { name: part, fullKey: keyAcc, children: new Map(), ownSessions: [] });
+          node = node.children.get(part);
+        }
+        node.ownSessions = g.sessions;
+      }
+      function finalize(node) {
+        let label = node.name, fullKey = node.fullKey, cur = node;
+        while (cur.ownSessions.length === 0 && cur.children.size === 1) {
+          const [[childName, child]] = cur.children.entries();
+          label += ' / ' + childName;
+          fullKey = child.fullKey;
+          cur = child;
+        }
+        const children = [...cur.children.values()].map(finalize).sort((a,b) => a.label.localeCompare(b.label));
+        const sessionIds = cur.ownSessions.map(s => s.session_id).concat(children.flatMap(c => c.sessionIds));
+        return { label, fullKey, children, sessions: cur.ownSessions, count: sessionIds.length, sessionIds };
+      }
+      return [...root.children.values()].map(finalize).sort((a,b) => a.label.localeCompare(b.label));
+    }
+
+    const projectTree = computed(() => buildProjectTree(filteredProjectGroups.value));
+
+    // Flattens the tree into rows (folder / date-header / session / child-session) for a single v-for,
+    // respecting each folder's collapsed state.
+    const sidebarRows = computed(() => {
+      const rows = [];
+      function walk(node, depth) {
+        rows.push({ type: 'folder', key: 'f:' + node.fullKey, node, depth });
+        if (collapsedFolders[node.fullKey]) return;
+        for (const child of node.children) walk(child, depth + 1);
+        if (node.sessions.length) {
+          for (const dg of groupByDate(node.sessions)) {
+            rows.push({ type: 'date', key: 'd:' + node.fullKey + ':' + dg.label, label: dg.label, depth: depth + 1 });
+            for (const s of dg.sessions) {
+              rows.push({ type: 'session', key: s.session_id, session: s, depth: depth + 1 });
+              if (s.child_ids?.length && expandedParents[s.session_id]) {
+                for (const childId of s.child_ids) {
+                  const c = sessionMap.value.get(childId);
+                  if (c) rows.push({ type: 'child', key: 'c:' + childId, session: c, depth: depth + 2 });
+                }
+              }
+            }
+          }
+        }
+      }
+      for (const node of projectTree.value) walk(node, 0);
+      return rows;
+    });
+
     function groupByDate(sl) {
       const groups = {};
       for (const s of sl) { const d=s.first_ts?s.first_ts.slice(0,10):'unknown'; if (!groups[d]) groups[d]=[]; groups[d].push(s); }
@@ -2437,21 +2498,21 @@ const app = createApp({
     }
     function toolClass(tool) { if (!tool) return 'default'; if (tool.startsWith('mcp__')) return 'mcp'; return tool.toLowerCase(); }
     function toggleEventResp(i) { if (openResps[i]) delete openResps[i]; else openResps[i]=true; }
-    function toggleProject(n) { if (collapsedProjects[n]) delete collapsedProjects[n]; else collapsedProjects[n]=true; }
+    function toggleFolder(key) { if (collapsedFolders[key]) delete collapsedFolders[key]; else collapsedFolders[key]=true; }
 
-    function isProjectFullySelected(grp) {
-      return grp.sessions.length > 0 && grp.sessions.every(s => selectedSessions.value.has(s.session_id));
+    function isFolderFullySelected(node) {
+      return node.sessionIds.length > 0 && node.sessionIds.every(id => selectedSessions.value.has(id));
     }
-    function isProjectPartiallySelected(grp) {
-      return grp.sessions.some(s => selectedSessions.value.has(s.session_id)) && !isProjectFullySelected(grp);
+    function isFolderPartiallySelected(node) {
+      return node.sessionIds.some(id => selectedSessions.value.has(id)) && !isFolderFullySelected(node);
     }
-    function toggleProjectSelect(grp) {
+    function toggleFolderSelect(node) {
       const s = new Set(selectedSessions.value);
-      if (isProjectFullySelected(grp)) {
-        grp.sessions.forEach(sess => s.delete(sess.session_id));
+      if (isFolderFullySelected(node)) {
+        node.sessionIds.forEach(id => s.delete(id));
       } else {
-        grp.sessions.forEach(sess => s.add(sess.session_id));
-        if (collapsedProjects[grp.project]) delete collapsedProjects[grp.project];
+        node.sessionIds.forEach(id => s.add(id));
+        if (collapsedFolders[node.fullKey]) delete collapsedFolders[node.fullKey];
       }
       selectedSessions.value = s;
     }
@@ -2675,13 +2736,13 @@ const app = createApp({
     return { sidebarWidth, sidebarDragging, startSidebarResize,
              sessions, activeSession, entries, stats, liveConnected, reloading, reloadAll, tab, autoScroll,
              sessionSearch, eventSearch, eventToolFilter, eventDirFilter, eventSkillsOnly, invokerChainFor, isSkillEvent, openResps,
-             collapsedProjects, eventsTable, searchInput,
+             collapsedFolders, eventsTable, searchInput,
              tree, tokenIndex, topTools, estimatedCost, sessionDuration,
-             filteredProjectGroups, filteredEvents, availableTools,
+             filteredProjectGroups, sidebarRows, filteredEvents, availableTools,
              groupByDate, timeOf, fmtK, fmtT, summarise, fmtResp, toolClass, groupSkills,
-             selectSession, toggleProject, toggleEventResp,
+             selectSession, toggleFolder, toggleEventResp,
              selectMode, selectedSessions, toggleSelectMode,
-             toggleSessionSelect, selectAllVisible, isProjectFullySelected, isProjectPartiallySelected, toggleProjectSelect,
+             toggleSessionSelect, selectAllVisible, isFolderFullySelected, isFolderPartiallySelected, toggleFolderSelect,
              deleteSingleSession, deleteSelectedSessions,
              archiveSelectedSessions,
              sessionMap, expandedParents, toggleParentExpand, activeParentSession,

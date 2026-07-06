@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import archiver from 'archiver';
-import { parseFile, mergeStats, AppEntry, Stats } from './LogParser';
+import { parseFile, mergeStats, AppEntry, Stats, TokenCounts } from './LogParser';
+import { buildBpmnPhases, BpmnProcess } from './BpmnBuilder';
 
 export interface SessionState {
   sessionId: string;
@@ -44,6 +45,33 @@ export interface SessionInfo {
   attribution_plugin: string;
   model: string;
   model_counts: Record<string, number>;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  project: string;
+  title: string;
+  model: string;
+  model_counts: Record<string, number>;
+  start_ts: string;
+  stop_ts: string;
+  duration_ms: number;
+  duration_human: string;
+  tokens: TokenCounts;
+  tools: Record<string, number>;
+  bpmn: BpmnProcess;
+}
+
+function formatDuration(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const parts: string[] = [];
+  if (h) parts.push(`${h}h`);
+  if (h || m) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
 }
 
 function getProjectName(dirName: string): string {
@@ -302,6 +330,30 @@ export class SessionManager extends EventEmitter {
     const state = this.sessions.get(sessionId);
     if (!state) return null;
     return state.stats;
+  }
+
+  getSummary(sessionId: string): SessionSummary | null {
+    const state = this.sessions.get(sessionId);
+    if (!state) return null;
+    const startTs = state.entries.find(e => e.ts)?.ts || '';
+    const stopTs = [...state.entries].reverse().find(e => e.ts)?.ts || '';
+    const durationMs = startTs && stopTs
+      ? Math.max(0, new Date(stopTs).getTime() - new Date(startTs).getTime())
+      : 0;
+    return {
+      session_id: state.sessionId,
+      project: state.project,
+      title: state.title,
+      model: state.model,
+      model_counts: state.modelCounts,
+      start_ts: startTs,
+      stop_ts: stopTs,
+      duration_ms: durationMs,
+      duration_human: formatDuration(durationMs),
+      tokens: state.stats.tokens,
+      tools: state.stats.tools,
+      bpmn: buildBpmnPhases(state.entries, state.title || state.sessionId),
+    };
   }
 
   deleteSessions(ids: string[]): void {
