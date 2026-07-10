@@ -4,39 +4,42 @@ import path from 'path';
 import fs from 'fs';
 import {
   SessionManager,
-  LogWatcher,
   TeamMonitor,
   Settings,
   buildFlow,
+  ClaudeAdapter,
+  OpenCodeAdapter,
 } from '../core';
 
 export interface ApiServerOptions {
   port: number;
   dataDir: string;
   staticDir?: string;
-  settingsDefaults?: { projectsDir?: string; teamsDir?: string };
+  settingsDefaults?: { projectsDir?: string; teamsDir?: string; opencodeDbPath?: string };
 }
 
 export interface ApiServerHandle {
   app: express.Express;
   manager: SessionManager;
-  watcher: LogWatcher;
   teams: TeamMonitor;
   settings: Settings;
   close: () => Promise<void>;
 }
 
 export async function createApiServer(opts: ApiServerOptions): Promise<ApiServerHandle> {
-  const defaults: Partial<{ projectsDir: string; teamsDir: string }> = {};
+  const defaults: Partial<{ projectsDir: string; teamsDir: string; opencodeDbPath: string }> = {};
   if (opts.settingsDefaults?.projectsDir) defaults.projectsDir = opts.settingsDefaults.projectsDir;
   if (opts.settingsDefaults?.teamsDir) defaults.teamsDir = opts.settingsDefaults.teamsDir;
+  if (opts.settingsDefaults?.opencodeDbPath) defaults.opencodeDbPath = opts.settingsDefaults.opencodeDbPath;
   const settings = new Settings(opts.dataDir, defaults);
   const cfg = settings.get();
 
-  const manager = new SessionManager(cfg.projectsDir, cfg.teamsDir);
+  const manager = new SessionManager([
+    new ClaudeAdapter(cfg.projectsDir, cfg.teamsDir),
+    new OpenCodeAdapter(cfg.opencodeDbPath, cfg.opencodeEnabled),
+  ]);
   await manager.loadAll();
-  const watcher = new LogWatcher(manager, cfg.projectsDir);
-  watcher.start();
+  manager.startWatchers();
   const teams = new TeamMonitor(cfg.teamsDir);
   await teams.loadAll();
   teams.start();
@@ -97,6 +100,7 @@ export async function createApiServer(opts: ApiServerOptions): Promise<ApiServer
     res.json({
       projectsDir: fs.existsSync(s.projectsDir),
       teamsDir: fs.existsSync(s.teamsDir),
+      opencodeDb: fs.existsSync(s.opencodeDbPath),
     });
   });
 
@@ -155,11 +159,10 @@ export async function createApiServer(opts: ApiServerOptions): Promise<ApiServer
   return {
     app,
     manager,
-    watcher,
     teams,
     settings,
     close: async () => {
-      watcher.stop();
+      manager.stopWatchers();
       teams.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },

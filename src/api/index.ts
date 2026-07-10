@@ -12,6 +12,7 @@ async function main(): Promise<void> {
   const envDefaults = {
     projectsDir: process.env.LOOMSCOPE_PROJECTS_DIR,
     teamsDir: process.env.LOOMSCOPE_TEAMS_DIR,
+    opencodeDbPath: process.env.LOOMSCOPE_OPENCODE_DB,
   };
   const handle = await createApiServer({ port, dataDir, staticDir, settingsDefaults: envDefaults });
 

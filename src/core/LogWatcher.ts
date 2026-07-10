@@ -1,16 +1,20 @@
 import chokidar, { FSWatcher } from 'chokidar';
 import path from 'path';
 import os from 'os';
-import { SessionManager } from './SessionManager';
 
 const DEBOUNCE_MS = 50;
+
+export interface SessionLoader {
+  loadSession(filePath: string): void;
+  processNewLines(filePath: string): void;
+}
 
 export class LogWatcher {
   private watcher: FSWatcher | null = null;
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private projectsDir: string;
 
-  constructor(private manager: SessionManager, projectsDir?: string) {
+  constructor(private manager: SessionLoader, projectsDir?: string) {
     this.projectsDir = projectsDir ?? path.join(os.homedir(), '.claude', 'projects');
   }
 

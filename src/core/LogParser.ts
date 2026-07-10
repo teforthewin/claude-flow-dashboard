@@ -5,6 +5,7 @@ export interface TokenCounts {
   output: number;
   cache_read: number;
   cache_create: number;
+  reasoning?: number;
 }
 
 export interface AppEntry {
@@ -129,7 +130,7 @@ function detectInjectedSkills(text: string): Array<{ name: string; raw: string }
   return out;
 }
 
-function buildCmd(tool: string, input: Record<string, unknown>): string {
+export function buildCmd(tool: string, input: Record<string, unknown>): string {
   switch (tool) {
     case 'Bash':
       return String(input.description || input.command || '').slice(0, 80);
@@ -289,6 +290,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
         output: usage.output_tokens || 0,
         cache_read: usage.cache_read_input_tokens || 0,
         cache_create: usage.cache_creation_input_tokens || 0,
+        reasoning: 0,
       };
 
       stats.tokens.input += turnTokens.input;
@@ -441,7 +443,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
 
 function emptyStats(): Stats {
   return {
-    tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0 },
+    tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0, reasoning: 0 },
     tools: {},
     timeline: [],
     agentRole: '',
@@ -459,6 +461,7 @@ export function mergeStats(base: Stats, delta: Stats): Stats {
       output: base.tokens.output + delta.tokens.output,
       cache_read: base.tokens.cache_read + delta.tokens.cache_read,
       cache_create: base.tokens.cache_create + delta.tokens.cache_create,
+      reasoning: (base.tokens.reasoning || 0) + (delta.tokens.reasoning || 0),
     },
     tools,
     timeline: [...base.timeline, ...delta.timeline],

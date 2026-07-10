@@ -5,3 +5,6 @@ export * from './TeamMonitor';
 export * from './Settings';
 export * from './FlowBuilder';
 export * from './BpmnBuilder';
+export * from './SourceAdapter';
+export * from './ClaudeAdapter';
+export * from './opencode';

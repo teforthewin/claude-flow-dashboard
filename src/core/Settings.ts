@@ -5,11 +5,17 @@ import os from 'os';
 export interface AppSettings {
   projectsDir: string;
   teamsDir: string;
+  opencodeDbPath: string;
+  opencodeEnabled: boolean;
 }
+
+const opencodeDataDir = process.env.OPENCODE_DATA_DIR || path.join(os.homedir(), '.local', 'share', 'opencode');
 
 const DEFAULTS: AppSettings = {
   projectsDir: path.join(os.homedir(), '.claude', 'projects'),
   teamsDir: path.join(os.homedir(), '.claude', 'teams'),
+  opencodeDbPath: path.join(opencodeDataDir, 'opencode.db'),
+  opencodeEnabled: true,
 };
 
 export class Settings {

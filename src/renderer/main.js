@@ -36,6 +36,16 @@ function modelClass(raw) {
   return 'model-dot';
 }
 
+function sourceLabel(s) {
+  const source = (s && s.source) || s;
+  return source === 'opencode' ? 'OpenCode' : 'Claude';
+}
+
+function sourceClass(s) {
+  const source = (s && s.source) || s;
+  return source === 'opencode' ? 'source-badge source-badge--opencode' : 'source-badge source-badge--claude';
+}
+
 function fmtK(n) {
   if (!n) return '0';
   if (n >= 1_000_000) return (Math.round(n / 100_000) / 10) + 'M';
@@ -1317,6 +1327,8 @@ const StepLane = {
     }
     function aggregate(nodes) { return aggregateStep(nodes); }
     function getLabelFor(n) { return getLabel(n); }
+    function isExpandablePrompt(n) { return n.tool === 'User' && String(n.input?.message || '').length > 120; }
+    function fullPromptText(n) { return String(n.input?.message || ''); }
     function getDescFor(n) { return getDescription(n); }
     function agentType(n) {
       const i = n.input || {};
@@ -1351,7 +1363,7 @@ const StepLane = {
     return { steps, toggle, isOpen, stepNum, navigate, agentChildSession, agentChildSessionId,
              aggregate, getLabelFor, getDescFor, agentType, groupSkills, fmtT, fmtK, fmtDur,
              injOpen, toggleInj, injFieldsFor, openPayloadModal,
-             formatModel, modelClass, resolveSubAgentModel };
+             formatModel, modelClass, resolveSubAgentModel, isExpandablePrompt, fullPromptText };
   },
   template: `
     <div class="sl-lane">
@@ -1363,17 +1375,20 @@ const StepLane = {
           <div class="sl-step__num">{{ stepNum(i) }}</div>
           <div class="sl-step__body">
             <div class="sl-step__hdr"
-                 :style="s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length ? 'cursor:pointer' : ''"
-                 @click="s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length ? toggle('s'+i) : null">
+                 :style="(s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length) || isExpandablePrompt(s.nodes[0]) ? 'cursor:pointer' : ''"
+                 @click="(s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length) || isExpandablePrompt(s.nodes[0]) ? toggle('s'+i) : null">
               <span class="sl-tag" :class="'ltag-'+s.nodes[0].tool.toLowerCase()">{{ s.nodes[0].tool }}</span>
-              <span class="sl-step__title">{{ getLabelFor(s.nodes[0]) || '—' }}</span>
+              <span class="sl-step__title" :class="isExpandablePrompt(s.nodes[0]) && !isOpen('s'+i) ? 'sl-step__title--clamp' : ''">
+                {{ isExpandablePrompt(s.nodes[0]) && isOpen('s'+i) ? '' : (getLabelFor(s.nodes[0]) || '—') }}
+              </span>
               <span class="sl-step__time">{{ fmtT(s.nodes[0].ts) }}</span>
-              <span v-if="s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length"
+              <span v-if="(s.nodes[0].tool==='SkillListing' && s.nodes[0].input?.skills?.length) || isExpandablePrompt(s.nodes[0])"
                     class="sl-step__chev">{{ isOpen('s'+i) ? '▼' : '▶' }}</span>
             </div>
             <div v-if="getDescFor(s.nodes[0])" class="sl-step__desc">{{ getDescFor(s.nodes[0]) }}</div>
             <div v-if="s.nodes[0].invokerChain && s.nodes[0].invokerChain.length"
                  class="sl-step__invoker">by: {{ s.nodes[0].invokerChain.join(' › ') }}</div>
+            <div v-if="isExpandablePrompt(s.nodes[0]) && isOpen('s'+i)" class="sl-step__prompt-full"><pre>{{ fullPromptText(s.nodes[0]) }}</pre></div>
             <div v-if="s.nodes[0].tool==='SkillListing' && isOpen('s'+i) && s.nodes[0].input?.skills?.length"
                  class="skill-groups" style="border-top:none;padding:6px 0">
               <div v-for="g in groupSkills(s.nodes[0].input.skills)" :key="g.plugin" class="skill-group">
@@ -1943,6 +1958,7 @@ const app = createApp({
     const tab = ref('flow');
     const autoScroll = ref(true);
     const sessionSearch = ref('');
+    const sourceFilter = ref('all');
     const eventSearch = ref('');
     const eventToolFilter = ref('');
     const eventDirFilter = reactive({ pre: true, post: true, command: true, prompt: true });
@@ -1961,11 +1977,13 @@ const app = createApp({
 
     // ── Settings state ───────────────────────────────────────────────────────
     const settingsOpen = ref(false);
-    const settingsDraft = ref({ projectsDir: '', teamsDir: '' });
-    const settingsSaved = ref({ projectsDir: '', teamsDir: '' });
+    const settingsDraft = ref({ projectsDir: '', teamsDir: '', opencodeDbPath: '', opencodeEnabled: true });
+    const settingsSaved = ref({ projectsDir: '', teamsDir: '', opencodeDbPath: '', opencodeEnabled: true });
     const settingsChanged = computed(() =>
       settingsDraft.value.projectsDir !== settingsSaved.value.projectsDir ||
-      settingsDraft.value.teamsDir !== settingsSaved.value.teamsDir
+      settingsDraft.value.teamsDir !== settingsSaved.value.teamsDir ||
+      settingsDraft.value.opencodeDbPath !== settingsSaved.value.opencodeDbPath ||
+      settingsDraft.value.opencodeEnabled !== settingsSaved.value.opencodeEnabled
     );
 
     const pathWarnings = ref([]);
@@ -1984,6 +2002,7 @@ const app = createApp({
         const warns = [];
         if (!ok.projectsDir) warns.push({ key: 'projectsDir', label: 'Projects folder' });
         if (!ok.teamsDir) warns.push({ key: 'teamsDir', label: 'Teams folder' });
+        if (settingsSaved.value.opencodeEnabled && !ok.opencodeDb) warns.push({ key: 'opencodeDbPath', label: 'OpenCode database' });
         pathWarnings.value = warns;
       } catch(e) { /* ignore */ }
     }
@@ -2339,6 +2358,7 @@ const app = createApp({
       const allIds = new Set(sessions.value.map(s => s.session_id));
       // Exclude subagent sessions whose parent is present — they appear as children under the parent
       let list = sessions.value.filter(s => !s.parent_id || !allIds.has(s.parent_id));
+      if (sourceFilter.value !== 'all') list = list.filter(s => (s.source || 'claude') === sourceFilter.value);
       if (q) list = list.filter(s => (s.project||'').toLowerCase().includes(q) || (s.session_id||'').toLowerCase().includes(q) || (s.first_ts||'').includes(q));
       const map = {};
       for (const s of list) { const p=s.project||''; if (!map[p]) map[p]=[]; map[p].push(s); }
@@ -2500,10 +2520,11 @@ const app = createApp({
     }
     function toggleFolderSelect(node) {
       const s = new Set(selectedSessions.value);
+      const selectableIds = node.sessionIds.filter(id => !sessionMap.value.get(id)?.read_only);
       if (isFolderFullySelected(node)) {
-        node.sessionIds.forEach(id => s.delete(id));
+        selectableIds.forEach(id => s.delete(id));
       } else {
-        node.sessionIds.forEach(id => s.add(id));
+        selectableIds.forEach(id => s.add(id));
         if (collapsedFolders[node.fullKey]) delete collapsedFolders[node.fullKey];
       }
       selectedSessions.value = s;
@@ -2514,6 +2535,7 @@ const app = createApp({
       if (!selectMode.value) selectedSessions.value = new Set();
     }
     function toggleSessionSelect(id) {
+      if (sessionMap.value.get(id)?.read_only) return;
       const s = new Set(selectedSessions.value);
       if (s.has(id)) s.delete(id); else s.add(id);
       selectedSessions.value = s;
@@ -2521,7 +2543,7 @@ const app = createApp({
     function selectAllVisible() {
       const s = new Set();
       for (const grp of filteredProjectGroups.value) {
-        for (const sess of grp.sessions) s.add(sess.session_id);
+        for (const sess of grp.sessions) { if (!sess.read_only) s.add(sess.session_id); }
       }
       selectedSessions.value = s;
     }
@@ -2754,7 +2776,7 @@ const app = createApp({
              settingsOpen, settingsDraft, settingsChanged, browseFolder, openFolder, saveSettings,
              pathWarnings,
              payloadModal, closePayload, copyPayloadField, copyPayloadAll,
-             formatModel, modelClass };
+             formatModel, modelClass, sourceFilter, sourceLabel, sourceClass };
   }
 });
 app.mount('#app');

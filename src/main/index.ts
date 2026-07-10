@@ -1,7 +1,7 @@
 import { app, BrowserWindow, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { SessionManager, LogWatcher, TeamMonitor } from '../core';
+import { SessionManager, TeamMonitor, ClaudeAdapter, OpenCodeAdapter } from '../core';
 import { Settings } from './Settings';
 import { registerIpcHandlers } from './ipc';
 
@@ -9,7 +9,6 @@ app.setName('LoomScope');
 
 let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager;
-let logWatcher: LogWatcher;
 let teamMonitor: TeamMonitor;
 let settings: Settings;
 let managerListeners: (() => void) | null = null;
@@ -57,11 +56,12 @@ function createWindow(): void {
 async function startManagers(): Promise<void> {
   const cfg = settings.get();
 
-  sessionManager = new SessionManager(cfg.projectsDir, cfg.teamsDir);
+  sessionManager = new SessionManager([
+    new ClaudeAdapter(cfg.projectsDir, cfg.teamsDir),
+    new OpenCodeAdapter(cfg.opencodeDbPath, cfg.opencodeEnabled),
+  ]);
   await sessionManager.loadAll();
-
-  logWatcher = new LogWatcher(sessionManager, cfg.projectsDir);
-  logWatcher.start();
+  sessionManager.startWatchers();
 
   teamMonitor = new TeamMonitor(cfg.teamsDir);
   await teamMonitor.loadAll();
@@ -109,7 +109,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   managerListeners?.();
   managerListeners = null;
-  logWatcher?.stop();
+  sessionManager?.stopWatchers();
   teamMonitor?.stop();
   if (process.platform !== 'darwin') app.quit();
 });

@@ -7,12 +7,14 @@ const BASE = process.env.LOOMSCOPE_API ?? 'http://127.0.0.1:7842';
 
 interface SessionInfo {
   session_id: string;
+  source: 'claude' | 'opencode';
   project: string;
   event_count: number;
   first_ts: string;
   last_ts: string;
   model?: string;
   title?: string;
+  read_only: boolean;
 }
 
 interface BpmnProcess {
@@ -98,21 +100,23 @@ async function cmdSessionsList(): Promise<void> {
   }
   const rows = list.slice(0, 50).map((s) => ({
     id: s.session_id.slice(0, 8),
+    source: s.source || 'claude',
     events: String(s.event_count).padStart(5),
     last: fmtTs(s.last_ts),
     project: s.project,
   }));
   const widths = {
     id: Math.max(8, ...rows.map((r) => r.id.length)),
+    source: Math.max(6, ...rows.map((r) => r.source.length)),
     events: 5,
     last: 19,
   };
   console.log(
-    `${'ID'.padEnd(widths.id)}  ${'EVENTS'.padStart(widths.events)}  ${'LAST'.padEnd(widths.last)}  PROJECT`,
+    `${'ID'.padEnd(widths.id)}  ${'SOURCE'.padEnd(widths.source)}  ${'EVENTS'.padStart(widths.events)}  ${'LAST'.padEnd(widths.last)}  PROJECT`,
   );
   for (const r of rows) {
     console.log(
-      `${r.id.padEnd(widths.id)}  ${r.events.padStart(widths.events)}  ${r.last.padEnd(widths.last)}  ${r.project}`,
+      `${r.id.padEnd(widths.id)}  ${r.source.padEnd(widths.source)}  ${r.events.padStart(widths.events)}  ${r.last.padEnd(widths.last)}  ${r.project}`,
     );
   }
   if (list.length > 50) console.log(`… ${list.length - 50} more`);

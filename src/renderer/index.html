@@ -269,6 +269,7 @@ input, select { font-family: inherit; }
 .hud__pill--cr  { color: #92400e; background: #fef3c7; }
 .hud__pill--cc  { color: #6b21a8; background: #f3e8ff; }
 .hud__pill--cost { color: #166534; background: #dcfce7; }
+.hud__pill--reasoning { color: #9a3412; background: #ffedd5; }
 .hud__sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; }
 .hud__tool {
   font-size: 10px; color: var(--text-2); background: var(--bg);
@@ -814,6 +815,17 @@ input, select { font-family: inherit; }
 .sl-step--solo     .sl-step__kind { background: #eff6ff; color: #1d4ed8; }
 .sl-step__count { font: 600 11px ui-monospace, monospace; color: var(--text-2); flex-shrink: 0; }
 .sl-step__title { font-weight: 600; color: #0f172a; flex-shrink: 0; }
+.sl-step__title--clamp {
+  flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sl-step__prompt-full {
+  margin-top: 6px; background: var(--bg-hover); border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px 10px; max-height: 400px; overflow: auto;
+}
+.sl-step__prompt-full pre {
+  margin: 0; font: 12px/1.5 var(--font-mono, ui-monospace, monospace); color: var(--text-1);
+  white-space: pre-wrap; word-break: break-word;
+}
 .sl-step__desc-inline {
   font-size: 11px; color: var(--text-2); flex: 1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1453,6 +1465,7 @@ input, select { font-family: inherit; }
 .tok-bar--output { background: #10b981; }
 .tok-bar--cread  { background: #f59e0b; }
 .tok-bar--cwrite { background: #f97316; }
+.tok-bar--reasoning { background: #9a3412; }
 .tok-bar--cat    { background: #8b5cf6; }
 .tok-bar--skill  { background: #7c3aed; }
 .tok-bar--agent  { background: #2563eb; }
@@ -1559,6 +1572,27 @@ input, select { font-family: inherit; }
   z-index: 9999;
   box-shadow: 0 4px 14px rgba(0,0,0,.25);
 }
+
+/* ── Source badge (Claude vs OpenCode session origin) ─────────── */
+:root {
+  --source-claude: #d97706;
+  --source-opencode: #0891b2;
+}
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 6px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+.source-badge--claude   { color: var(--source-claude);   background: color-mix(in srgb, var(--source-claude) 15%, transparent); }
+.source-badge--opencode { color: var(--source-opencode); background: color-mix(in srgb, var(--source-opencode) 15%, transparent); }
 
 /* ── Payload large-view modal ──────────────────────────────────── */
 .pl-modal {
@@ -1699,6 +1733,11 @@ input, select { font-family: inherit; }
     <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
       <div class="sidebar__hdr">
         <span class="sidebar__title">Sessions</span>
+        <select class="sidebar__search" style="flex:0 0 auto" v-model="sourceFilter" title="Filter by source">
+          <option value="all">All</option>
+          <option value="claude">Claude</option>
+          <option value="opencode">OpenCode</option>
+        </select>
         <input class="sidebar__search" type="text" placeholder="Search..."
                v-model="sessionSearch" ref="searchInput" />
       </div>
@@ -1707,7 +1746,7 @@ input, select { font-family: inherit; }
           <div v-if="row.type === 'folder'" class="proj-hdr"
                :style="{ paddingLeft: (12 + row.depth*14) + 'px', position: row.depth===0 ? 'sticky' : 'static' }"
                @click="selectMode ? toggleFolderSelect(row.node) : toggleFolder(row.node.fullKey)">
-            <input v-if="selectMode" type="checkbox" class="proj-hdr__check"
+            <input v-if="selectMode" type="checkbox" class="proj-hdr__check" :disabled="row.node.sessionIds.every(id => sessionMap.get(id)?.read_only)"
                    :checked="isFolderFullySelected(row.node)"
                    :indeterminate.prop="isFolderPartiallySelected(row.node)"
                    @click.stop="toggleFolderSelect(row.node)" />
@@ -1724,10 +1763,11 @@ input, select { font-family: inherit; }
                     row.session.child_ids?.length && expandedParents[row.session.session_id] ? 'sess--expanded' : '']"
                :style="{ paddingLeft: (12 + row.depth*14) + 'px' }"
                @click="selectMode ? toggleSessionSelect(row.session.session_id) : selectSession(row.session.session_id)">
-            <input v-if="selectMode" type="checkbox" class="sess__check"
+            <input v-if="selectMode" type="checkbox" class="sess__check" :disabled="row.session.read_only"
                    :checked="selectedSessions.has(row.session.session_id)"
                    @click.stop="toggleSessionSelect(row.session.session_id)" />
             <span v-if="row.session.is_active" class="sess__live">LIVE</span>
+            <span :class="sourceClass(row.session)">{{ sourceLabel(row.session).slice(0,2) }}</span>
             <span v-if="row.session.model" :class="modelClass(row.session.model)" :data-tip="formatModel(row.session.model)"></span>
             <span class="sess__title">{{ row.session.title || timeOf(row.session.first_ts) || row.session.session_id.slice(0,8) }}</span>
             <button v-if="!selectMode && row.session.child_ids?.length" class="sess__children-btn"
@@ -1737,18 +1777,19 @@ input, select { font-family: inherit; }
             <button v-if="!selectMode" class="sess__copy"
                     @click.stop="copySessionId(row.session.session_id, $event)"
                     :title="'Copy session id: ' + row.session.session_id">{{ copiedSessionId === row.session.session_id ? '✓' : '⧉' }}</button>
-            <button v-if="!selectMode" class="sess__del" @click.stop="deleteSingleSession(row.session.session_id)"
+            <button v-if="!selectMode && !row.session.read_only" class="sess__del" @click.stop="deleteSingleSession(row.session.session_id)"
                     title="Delete session">&times;</button>
           </div>
           <div v-else-if="row.type === 'child'"
                :class="['sess', 'sess--child', row.session.session_id === activeSession && !selectMode ? 'sess--active' : '']"
                :style="{ paddingLeft: (24 + row.depth*14) + 'px' }"
                @click="selectMode ? toggleSessionSelect(row.session.session_id) : selectSession(row.session.session_id)">
-            <input v-if="selectMode" type="checkbox" class="sess__check"
+            <input v-if="selectMode" type="checkbox" class="sess__check" :disabled="row.session.read_only"
                    :checked="selectedSessions.has(row.session.session_id)"
                    @click.stop="toggleSessionSelect(row.session.session_id)" />
             <span class="sess__child-icon">⤷</span>
             <span v-if="row.session.is_active" class="sess__live">LIVE</span>
+            <span :class="sourceClass(row.session)">{{ sourceLabel(row.session).slice(0,2) }}</span>
             <span v-if="row.session.model" :class="modelClass(row.session.model)" :data-tip="formatModel(row.session.model)"></span>
             <span class="sess__child-title">{{ row.session.title || row.session.agent_description || row.session.agent_name || timeOf(row.session.first_ts) }}</span>
             <button v-if="!selectMode" class="sess__copy"
@@ -1804,6 +1845,7 @@ input, select { font-family: inherit; }
     <div class="right">
       <!-- Session title bar -->
       <div class="session-title-bar" v-if="sessionTitle">
+        <span v-if="sessionMap.get(activeSession)" :class="sourceClass(sessionMap.get(activeSession))">{{ sourceLabel(sessionMap.get(activeSession)) }}</span>
         <span v-if="sessionMap.get(activeSession)?.model"
               :class="modelClass(sessionMap.get(activeSession).model)"
               :data-tip="formatModel(sessionMap.get(activeSession).model)"></span>
@@ -1822,6 +1864,7 @@ input, select { font-family: inherit; }
         <span class="hud__pill hud__pill--out" v-if="stats.tokens.output">&darr; {{ fmtK(stats.tokens.output) }}</span>
         <span class="hud__pill hud__pill--cr" v-if="stats.tokens.cache_read">&larrhk; {{ fmtK(stats.tokens.cache_read) }}</span>
         <span class="hud__pill hud__pill--cc" v-if="stats.tokens.cache_create">cache {{ fmtK(stats.tokens.cache_create) }}</span>
+        <span class="hud__pill hud__pill--reasoning" v-if="stats.tokens.reasoning">reasoning {{ fmtK(stats.tokens.reasoning) }}</span>
         <span class="hud__sep" v-if="estimatedCost"></span>
         <span class="hud__pill hud__pill--cost" v-if="estimatedCost">~${{ estimatedCost }}</span>
         <span class="hud__sep" v-if="topTools.length"></span>
@@ -2072,6 +2115,12 @@ input, select { font-family: inherit; }
               <span class="tok-row__pct">{{ (tokenStats.tokens.cache_create / tokenStats.total * 100).toFixed(0) }}%</span>
               <span class="tok-row__num">{{ fmtK(tokenStats.tokens.cache_create) }}</span>
             </div>
+            <div class="tok-row" v-if="tokenStats.tokens.reasoning">
+              <span class="tok-row__lbl">Reasoning</span>
+              <div class="tok-row__track"><div class="tok-row__bar tok-bar--reasoning" :style="{ width: (tokenStats.tokens.reasoning / tokenStats.total * 100) + '%' }"></div></div>
+              <span class="tok-row__pct">{{ (tokenStats.tokens.reasoning / tokenStats.total * 100).toFixed(0) }}%</span>
+              <span class="tok-row__num">{{ fmtK(tokenStats.tokens.reasoning) }}</span>
+            </div>
           </div>
 
           <!-- By activity category -->
@@ -2178,6 +2227,16 @@ input, select { font-family: inherit; }
             <button class="settings-browse" @click="browseFolder('teamsDir')">Browse</button>
           </div>
           <div class="settings-hint">Where Claude Code stores team sessions (default: ~/.claude/teams)</div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label">
+            <input type="checkbox" v-model="settingsDraft.opencodeEnabled" style="margin-right:6px" />
+            Show OpenCode sessions
+          </label>
+          <div class="settings-input-row">
+            <input class="settings-input" v-model="settingsDraft.opencodeDbPath" :disabled="!settingsDraft.opencodeEnabled" />
+          </div>
+          <div class="settings-hint">Path to opencode.db (default: ~/.local/share/opencode/opencode.db). OpenCode sessions are read-only.</div>
         </div>
       </div>
       <div class="settings-modal__footer">

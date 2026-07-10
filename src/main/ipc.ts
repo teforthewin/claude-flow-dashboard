@@ -61,7 +61,7 @@ async function createTeamArchive(
 export function registerIpcHandlers(manager: SessionManager, teamMonitor: TeamMonitor, appSettings: Settings): void {
   ipcMain.handle('settings:get', () => appSettings.get());
 
-  ipcMain.handle('settings:set', async (e, patch: Partial<{ projectsDir: string; teamsDir: string }>) => {
+  ipcMain.handle('settings:set', async (e, patch: Partial<{ projectsDir: string; teamsDir: string; opencodeDbPath: string; opencodeEnabled: boolean }>) => {
     appSettings.set(patch);
     BrowserWindow.fromWebContents(e.sender)?.webContents.send('settings:changed', appSettings.get());
   });
@@ -80,6 +80,7 @@ export function registerIpcHandlers(manager: SessionManager, teamMonitor: TeamMo
     return {
       projectsDir: fs.existsSync(s.projectsDir),
       teamsDir: fs.existsSync(s.teamsDir),
+      opencodeDb: fs.existsSync(s.opencodeDbPath),
     };
   });
 

@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev-rename-electron.js && electron-vite dev",
-    "postinstall": "node scripts/dev-rename-electron.js || true",
+    "postinstall": "node scripts/dev-rename-electron.js || true && electron-rebuild -f -w better-sqlite3 || true",
     "build": "electron-vite build",
     "build:api": "tsc -p tsconfig.api.json",
     "build:renderer:web": "vite build -c vite.renderer.config.ts",
@@ -33,6 +33,7 @@
   "dependencies": {
     "@types/archiver": "^7.0.0",
     "archiver": "^7.0.1",
+    "better-sqlite3": "^12.11.1",
     "chokidar": "^3.6.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
@@ -41,6 +42,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "electron": "^42.1.0",
@@ -54,6 +56,9 @@
     "productName": "LoomScope",
     "copyright": "Copyright © 2025",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
     "directories": {
       "output": "dist",
       "buildResources": "build"
