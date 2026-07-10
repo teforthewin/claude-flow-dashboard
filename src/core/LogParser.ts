@@ -53,6 +53,7 @@ export interface ParseResult {
   attributionPlugin: string;
   model: string;
   modelCounts: Record<string, number>;
+  cwd: string;
 }
 
 interface NativeContentBlock {
@@ -93,6 +94,7 @@ interface NativeEntry {
   attributionSkill?: string;
   attributionAgent?: string;
   attributionPlugin?: string;
+  cwd?: string;
   attachment?: {
     type: string;
     content?: string;
@@ -177,7 +179,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   try {
     lines = fs.readFileSync(filePath, 'utf-8').split('\n');
   } catch {
-    return { entries: [], stats: emptyStats(), lastLine: fromLine, agentSetting: '', agentName: '', teamName: '', teamTask: '', attributionSkill: '', attributionAgent: '', attributionPlugin: '', model: '', modelCounts: {} };
+    return { entries: [], stats: emptyStats(), lastLine: fromLine, agentSetting: '', agentName: '', teamName: '', teamTask: '', attributionSkill: '', attributionAgent: '', attributionPlugin: '', model: '', modelCounts: {}, cwd: '' };
   }
 
   const entries: AppEntry[] = [];
@@ -190,6 +192,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
   let sessionAttributionSkill = '';
   let sessionAttributionAgent = '';
   let sessionAttributionPlugin = '';
+  let sessionCwd = '';
   const modelCounts: Record<string, number> = {};
 
   for (let i = fromLine; i < lines.length; i++) {
@@ -210,6 +213,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
     if (obj.attributionSkill && !sessionAttributionSkill) sessionAttributionSkill = String(obj.attributionSkill);
     if (obj.attributionAgent && !sessionAttributionAgent) sessionAttributionAgent = String(obj.attributionAgent);
     if (obj.attributionPlugin && !sessionAttributionPlugin) sessionAttributionPlugin = String(obj.attributionPlugin);
+    if (obj.cwd && !sessionCwd) sessionCwd = String(obj.cwd);
 
     const attribution = (obj.attributionSkill || obj.attributionAgent || obj.attributionPlugin)
       ? {
@@ -431,6 +435,7 @@ export function parseFile(filePath: string, fromLine = 0): ParseResult {
     attributionPlugin: sessionAttributionPlugin,
     model: dominantModel,
     modelCounts,
+    cwd: sessionCwd,
   };
 }
 

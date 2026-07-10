@@ -78,6 +78,15 @@ function getProjectName(dirName: string): string {
   return dirName.replace(/^-/, '');
 }
 
+// Truncates long free-form text (e.g. a sub-agent's task description) while keeping both
+// ends visible, so sessions that share a long common prefix (e.g. the same temp directory
+// path) still read as distinct rows in the sidebar instead of all showing the same clipped start.
+function middleEllipsis(text: string, max = 90): string {
+  if (text.length <= max) return text;
+  const keep = Math.floor((max - 1) / 2);
+  return `${text.slice(0, keep)}…${text.slice(text.length - keep)}`;
+}
+
 function isActive(lastMtime: number): boolean {
   return (Date.now() / 1000 - lastMtime) < 300;
 }
@@ -190,7 +199,7 @@ export class SessionManager extends EventEmitter {
       projectDir = dirName;
     }
 
-    const project = getProjectName(projectDir);
+    const fallbackProject = getProjectName(projectDir);
 
     let mtime = 0;
     try {
@@ -198,8 +207,13 @@ export class SessionManager extends EventEmitter {
     } catch { /* ignore */ }
 
     const result = parseFile(filePath, 0);
+    // cwd is the real, unambiguous filesystem path recorded on every transcript line.
+    // The on-disk project directory name only approximates it (Claude Code replaces both
+    // '/' and '.' with '-' when encoding the path), which is ambiguous to reverse once the
+    // real path itself contains hyphens (e.g. "agent-flow-front", "AI-benchmark").
+    const project = (result.cwd ? result.cwd.replace(/^\//, '') : '') || fallbackProject;
     const firstPrompt = result.entries.find(e => e.event === 'prompt' && e.tool === 'User');
-    const baseTitle = firstPrompt?.cmd || result.teamTask || result.agentSetting || agentDescription;
+    const baseTitle = firstPrompt?.cmd || result.teamTask || result.agentSetting || middleEllipsis(agentDescription);
     const title = result.agentName && baseTitle
       ? `[${result.agentName}] ${baseTitle}`
       : result.agentName || baseTitle;

@@ -1717,7 +1717,6 @@ input, select { font-family: inherit; }
             </span>
             <span class="proj-hdr__count">{{ row.node.count }}</span>
           </div>
-          <div v-else-if="row.type === 'date'" class="date-hdr" :style="{ paddingLeft: (12 + row.depth*14) + 'px' }">{{ row.label }}</div>
           <div v-else-if="row.type === 'session'"
                :class="['sess',
                     !selectMode && (row.session.session_id === activeSession || activeParentSession?.session_id === row.session.session_id) ? 'sess--active' : '',

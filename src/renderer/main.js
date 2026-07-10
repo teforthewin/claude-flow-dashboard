@@ -2349,17 +2349,20 @@ const app = createApp({
     });
 
     // Turns the flat {project, sessions} groups into a folder tree by splitting each
-    // project's encoded path on '-' (Claude Code replaces '/' with '-' in project dir names).
+    // project's real filesystem path on '/' (the path comes from the `cwd` recorded in each
+    // transcript line, not the on-disk project-dir name — that name encodes '/' AND '.' as '-',
+    // which is ambiguous to reverse once a real folder name contains a hyphen itself, e.g.
+    // "agent-flow-front" or "AI-benchmark", and used to shred those into bogus single-letter-ish folders).
     // Chains of single-child folders are compacted into one "a / b / c" row, mirroring
     // how VS Code's explorer collapses nested single-child directories.
     function buildProjectTree(groups) {
       const root = { name: '', fullKey: '', children: new Map(), ownSessions: [] };
       for (const g of groups) {
         const project = g.project || '';
-        const parts = project ? project.split('-').filter(Boolean) : ['(no project)'];
+        const parts = project ? project.split('/').filter(Boolean) : ['(no project)'];
         let node = root, keyAcc = '';
         for (const part of parts) {
-          keyAcc = keyAcc ? keyAcc + '-' + part : part;
+          keyAcc = keyAcc ? keyAcc + '/' + part : part;
           if (!node.children.has(part)) node.children.set(part, { name: part, fullKey: keyAcc, children: new Map(), ownSessions: [] });
           node = node.children.get(part);
         }
@@ -2382,7 +2385,7 @@ const app = createApp({
 
     const projectTree = computed(() => buildProjectTree(filteredProjectGroups.value));
 
-    // Flattens the tree into rows (folder / date-header / session / child-session) for a single v-for,
+    // Flattens the tree into rows (folder / session / child-session) for a single v-for,
     // respecting each folder's collapsed state.
     const sidebarRows = computed(() => {
       const rows = [];
@@ -2390,17 +2393,12 @@ const app = createApp({
         rows.push({ type: 'folder', key: 'f:' + node.fullKey, node, depth });
         if (collapsedFolders[node.fullKey]) return;
         for (const child of node.children) walk(child, depth + 1);
-        if (node.sessions.length) {
-          for (const dg of groupByDate(node.sessions)) {
-            rows.push({ type: 'date', key: 'd:' + node.fullKey + ':' + dg.label, label: dg.label, depth: depth + 1 });
-            for (const s of dg.sessions) {
-              rows.push({ type: 'session', key: s.session_id, session: s, depth: depth + 1 });
-              if (s.child_ids?.length && expandedParents[s.session_id]) {
-                for (const childId of s.child_ids) {
-                  const c = sessionMap.value.get(childId);
-                  if (c) rows.push({ type: 'child', key: 'c:' + childId, session: c, depth: depth + 2 });
-                }
-              }
+        for (const s of node.sessions) {
+          rows.push({ type: 'session', key: s.session_id, session: s, depth: depth + 1 });
+          if (s.child_ids?.length && expandedParents[s.session_id]) {
+            for (const childId of s.child_ids) {
+              const c = sessionMap.value.get(childId);
+              if (c) rows.push({ type: 'child', key: 'c:' + childId, session: c, depth: depth + 2 });
             }
           }
         }
@@ -2409,17 +2407,6 @@ const app = createApp({
       return rows;
     });
 
-    function groupByDate(sl) {
-      const groups = {};
-      for (const s of sl) { const d=s.first_ts?s.first_ts.slice(0,10):'unknown'; if (!groups[d]) groups[d]=[]; groups[d].push(s); }
-      const today = new Date().toISOString().slice(0,10), yday = new Date(Date.now()-864e5).toISOString().slice(0,10);
-      return Object.entries(groups).map(([date,sessions])=>{
-        let label = date;
-        if (date===today) label='Today'; else if (date===yday) label='Yesterday';
-        else { const d=new Date(date); if (!isNaN(d)) label=d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
-        return {label,sessions};
-      });
-    }
     function timeOf(ts) { return ts ? ts.slice(11,16) : '--:--'; }
 
     const availableTools = computed(() => { const s=new Set(); for (const e of entries.value) if (e.tool) s.add(e.tool); return [...s].sort(); });
@@ -2744,7 +2731,7 @@ const app = createApp({
              collapsedFolders, eventsTable, searchInput,
              tree, tokenIndex, topTools, estimatedCost, sessionDuration,
              filteredProjectGroups, sidebarRows, filteredEvents, availableTools,
-             groupByDate, timeOf, fmtK, fmtT, summarise, fmtResp, toolClass, groupSkills,
+             timeOf, fmtK, fmtT, summarise, fmtResp, toolClass, groupSkills,
              selectSession, toggleFolder, toggleEventResp,
              selectMode, selectedSessions, toggleSelectMode,
              toggleSessionSelect, selectAllVisible, isFolderFullySelected, isFolderPartiallySelected, toggleFolderSelect,
